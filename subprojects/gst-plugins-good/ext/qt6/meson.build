@@ -53,9 +53,13 @@ qt6_option = get_option('qt6')
 qt6_egl = get_option('qt-egl')
 qt6_wayland = get_option('qt-wayland')
 qt6_x11 = get_option('qt-x11')
+qt6_method = get_option('qt-method')
 
-# We always use CMake for Qt6 discovery (robust for Android kits)
-qt6_method = 'cmake'
+# Meson here supports: auto, pkg-config, config-tool. Fall back if cmake is set.
+if qt6_method == 'cmake'
+  message('qt-method=cmake not supported in this build; falling back to config-tool')
+  qt6_method = 'config-tool'
+endif
 
 if qt6_option.disabled()
   subdir_done()
@@ -73,25 +77,26 @@ if not add_languages('cpp', native: false, required: qt6_option)
 endif
 
 qt6_mod = import('qt6')
-# Don't hard-fail if tools aren't probed; CI/native file can provide them.
 if meson.version().version_compare('>=1.6')
   have_tools = qt6_mod.has_tools(method: qt6_method, tools: ['moc', 'uic', 'rcc'])
 else
   have_tools = qt6_mod.has_tools(method: qt6_method)
 endif
 if not have_tools
-  message('qt6 tools not found via Meson probe; relying on CMake discovery and native-file tools')
+  if qt6_option.enabled()
+    error('qt6 qmlglsink plugin is enabled, but qt specific tools were not found')
+  endif
+  subdir_done()
 endif
 
 qt6qml_dep = dependency('qt6', modules : ['Core', 'Gui', 'Qml', 'Quick'],
-                        method: qt6_method, required: qt6_option,
-                        static: host_system == 'ios', private_headers: true)
+                        method: qt6_method, required: qt6_option, static: host_system == 'ios', private_headers: true)
 if not qt6qml_dep.found()
   subdir_done()
 endif
 
-# Prefer PATH-provided tools; CI adds host Qt bin to PATH.
-qsb = find_program('qsb', 'qsb-qt6', required: qt6_option)
+qt6_bindir = qt6qml_dep.get_variable('bindir', configtool: 'QT_HOST_BINS')
+qsb = find_program('qsb-qt6', 'qsb', dirs: [qt6_bindir], required: qt6_option)
 if not qsb.found()
   subdir_done()
 endif
@@ -102,7 +107,7 @@ qt_defines = []
 have_qpa_include = false
 have_qt_windowing = false
 
-# Portable QPA header check (works with CMake-provided includes)
+# Portable QPA header check (works with config-tool discovery)
 qpa_header = 'QtGui/qpa/qplatformnativeinterface.h'
 need_qpa_include = qt6_option.enabled() and (host_system == 'android' or qt6_wayland.enabled())
 if cxx.has_header(qpa_header, dependencies : qt6qml_dep, required: need_qpa_include)
@@ -112,7 +117,7 @@ if cxx.has_header(qpa_header, dependencies : qt6qml_dep, required: need_qpa_incl
   message('Found QtGui QPA header: ' + qpa_header)
 endif
 
-## Windowing/platform combos
+## Try to come up with all the platform/winsys combinations that will work
 
 # X11 windowing
 qt6_x11 = qt6_x11 \
@@ -139,7 +144,7 @@ if qt6_wayland.allowed()
   endif
 endif
 
-# EGL windowing (Embedded Linux and Android)
+# EGL windowing for Embedded Linux and Android
 qt6_egl = qt6_egl \
     .require(host_system == 'linux' or host_system == 'android') \
     .require(gstglegl_dep.found(), error_message: 'gstreamer-gl-egl-1.0 is required') \
@@ -215,19 +220,15 @@ if qt6_option.require(have_qt_windowing, error_message: 'No windowing, enable on
       shaders += [compiled_shader_external]
     endif
   endforeach
-
   resource_file = configure_file(input: 'resources.qrc', output: 'resources.qrc', copy: true)
   qresources = qt6_mod.compile_resources(sources: resource_file, method: qt6_method)
 
   qml6gl_kwargs = {}
   if host_system == 'darwin'
     fs = import('fs')
-    q = find_program('qmake6', required: false)
-    if q.found()
-      qt_bindir = fs.parent(q.full_path())
-      qt_libdir = fs.parent(qt_bindir) / 'lib'
-      qml6gl_kwargs += {'build_rpath': qt_libdir}
-    endif
+    qt_bindir = fs.parent(find_program('qmake6', required: false).full_path())
+    qt_libdir = fs.parent(qt_bindir) / 'lib'
+    qml6gl_kwargs += {'build_rpath': qt_libdir}
   endif
 
   gstqml6gl = library('gstqml6', qt6_sources, moc_files, qresources,
