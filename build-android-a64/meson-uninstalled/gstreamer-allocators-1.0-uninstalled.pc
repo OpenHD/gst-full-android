@@ -1,0 +1,11 @@
+prefix=/home/openhd/gst-android/src/gstreamer-amy/build-android-a64
+includedir=${prefix}/include
+libdir=${prefix}/lib
+srcdir=/home/openhd/gst-android/src/gstreamer-amy
+
+Name: gstreamer-allocators-1.0
+Description: Allocators implementation
+Version: 1.27.1.1
+Requires: gstreamer-1.0, glib-2.0 >=  2.64.0, gobject-2.0, gmodule-no-export-2.0
+Libs: -L${prefix}/subprojects/gst-plugins-base/gst-libs/gst/allocators -lgstallocators-1.0
+Cflags: -I${prefix}/subprojects/gst-plugins-base -I${srcdir}/subprojects/gst-plugins-base -I${prefix}/subprojects/gst-plugins-base/gst-libs -I${srcdir}/subprojects/gst-plugins-base/gst-libs -I${prefix}/subprojects/gstreamer -I${srcdir}/subprojects/gstreamer -I${prefix}/subprojects/gst-plugins-base/gst-libs/gst/allocators -I${srcdir}/subprojects/gst-plugins-base/gst-libs/gst/allocators -DGST_STATIC_COMPILATION

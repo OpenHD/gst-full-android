@@ -1,0 +1,11 @@
+prefix=/home/openhd/gst-android/src/gstreamer-amy/build-android-a64
+includedir=${prefix}/include
+libdir=${prefix}/lib
+srcdir=/home/openhd/gst-android/src/gstreamer-amy
+
+Name: gstopengl
+Description: gstreamer-full: gstopengl
+Version: 1.27.1.1
+Requires: gstreamer-gl-1.0, gstreamer-video-1.0, gstreamer-base-1.0, gstreamer-1.0, gstreamer-controller-1.0, glib-2.0 >=  2.64.0, gobject-2.0, gmodule-no-export-2.0
+Libs: -L${prefix}/subprojects/gst-plugins-base/ext/gl -lgstopengl -lm
+Cflags: -I${prefix}/subprojects/gst-plugins-base -I${srcdir}/subprojects/gst-plugins-base -I${prefix}/subprojects/gst-plugins-base/gst-libs -I${srcdir}/subprojects/gst-plugins-base/gst-libs -I${prefix}/subprojects/gl-headers/glext -I${srcdir}/subprojects/gl-headers/glext -I${prefix}/subprojects/gl-headers/khrplatform -I${srcdir}/subprojects/gl-headers/khrplatform -I${prefix}/subprojects/gl-headers/wglext -I${srcdir}/subprojects/gl-headers/wglext -I${prefix}/subprojects/gstreamer/libs -I${srcdir}/subprojects/gstreamer/libs -I${prefix}/subprojects/gstreamer -I${srcdir}/subprojects/gstreamer -I${prefix}/subprojects/gst-plugins-base/ext/gl -I${srcdir}/subprojects/gst-plugins-base/ext/gl -DGST_STATIC_COMPILATION

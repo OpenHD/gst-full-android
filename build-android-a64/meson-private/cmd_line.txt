@@ -1,0 +1,28 @@
+[options]
+auto_features = disabled
+introspection = disabled
+tests = disabled
+examples = disabled
+gtk_doc = disabled
+gpl = enabled
+libav = enabled
+good = enabled
+gst-plugins-good:qt6 = enabled
+gst-plugins-base:app = enabled
+gst-plugins-base:playback = enabled
+gst-plugins-base:video = enabled
+gst-plugins-base:audio = enabled
+gst-plugins-base:typefind = enabled
+gst-plugins-base:codecparsers = enabled
+gst-plugins-base:gl = enabled
+gst-full-target-type = static_library
+gst-full-libraries = app,video,audio,gl,codecparsers
+prefix = /home/openhd/gst-android/prefix/aarch64
+default_library = static
+gst-full = enabled
+qt:qt_host_path = /opt/Qt/6.9.1/gcc_64
+qt:cmake_module_path = /home/openhd/.qt/Qt/6.9.1/android_arm64_v8a/lib/cmake;/home/openhd/.qt/Qt/6.9.1/android_arm64_v8a/lib/cmake/Qt6
+
+[properties]
+cross_file = ['/home/openhd/gst-android/android-aarch64.ini']
+

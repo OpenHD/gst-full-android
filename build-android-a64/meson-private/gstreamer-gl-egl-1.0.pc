@@ -1,0 +1,10 @@
+prefix=/home/openhd/gst-android/prefix/aarch64
+includedir=${prefix}/include
+libdir=${prefix}/lib
+
+Name: gstreamer-gl-egl-1.0
+Description: Streaming media framework, OpenGL plugins libraries (EGL specifics)
+Version: 1.27.1.1
+Requires: gstreamer-gl-1.0
+Libs: -lEGL
+Cflags: -I${includedir}/gstreamer-1.0

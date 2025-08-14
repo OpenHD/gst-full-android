@@ -1,0 +1,12 @@
+prefix=/home/openhd/gst-android/src/gstreamer-amy/build-android-a64
+includedir=${prefix}/include
+srcdir=/home/openhd/gst-android/src/gstreamer-amy
+
+libraries=allocators app audio fft pbutils riff rtp rtsp sdp tag video gl
+
+Name: gstreamer-plugins-base-1.0
+Description: Streaming media framework, base plugins libraries
+Version: 1.27.1.1
+Requires: gstreamer-1.0
+Requires.private: glib-2.0 >=  2.64.0, gobject-2.0, gmodule-no-export-2.0
+Cflags: -I${prefix}/subprojects/gstreamer -I${srcdir}/subprojects/gstreamer -DGST_STATIC_COMPILATION

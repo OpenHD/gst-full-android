@@ -1,0 +1,15 @@
+prefix=/home/openhd/gst-android/src/gstreamer-amy/build-android-a64
+includedir=${prefix}/include
+libdir=${prefix}/lib
+srcdir=/home/openhd/gst-android/src/gstreamer-amy
+
+gl_platforms=egl
+gl_winsys=egl surfaceless android
+gl_apis=gles2
+
+Name: gstreamer-gl-1.0
+Description: Streaming media framework, OpenGL plugins libraries
+Version: 1.27.1.1
+Requires: gstreamer-base-1.0, gstreamer-1.0, gstreamer-video-1.0, glib-2.0 >=  2.64.0, gobject-2.0, gmodule-no-export-2.0
+Libs: -L${prefix}/subprojects/gst-plugins-base/gst-libs/gst/gl -lgstgl-1.0 -lm -lGLESv2 -lEGL
+Cflags: -I${prefix}/subprojects/gst-plugins-base -I${srcdir}/subprojects/gst-plugins-base -I${prefix}/subprojects/gst-plugins-base/gst-libs -I${srcdir}/subprojects/gst-plugins-base/gst-libs -I${prefix}/subprojects/gl-headers/glext -I${srcdir}/subprojects/gl-headers/glext -I${prefix}/subprojects/gl-headers/khrplatform -I${srcdir}/subprojects/gl-headers/khrplatform -I${prefix}/subprojects/gl-headers/wglext -I${srcdir}/subprojects/gl-headers/wglext -I${prefix}/subprojects/gstreamer/libs -I${srcdir}/subprojects/gstreamer/libs -I${prefix}/subprojects/gstreamer -I${srcdir}/subprojects/gstreamer -I${prefix}/subprojects/gst-plugins-base/gst-libs/gst/gl -I${srcdir}/subprojects/gst-plugins-base/gst-libs/gst/gl -DGST_STATIC_COMPILATION -I${libdir}/gstreamer-1.0/include
