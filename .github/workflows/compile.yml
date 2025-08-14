@@ -1,0 +1,226 @@
+name: android-gst-full
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+    inputs:
+      enable_qt6_plugin:
+        description: "Build gst-plugins-good:qt6 (requires your branch patches)"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+env:
+  # Versions / paths
+  API_LEVEL: "35"
+  NDK_VERSION: "r27c"
+  NDK_DIR: /opt/android/ndk-r27c
+  PREFIX: ${{ github.workspace }}/prefix/aarch64
+  SRC_DIR: ${{ github.workspace }}/src
+  QT_VERSION: "6.9.1"
+  QT_HOST_DIR: /opt/Qt/6.9.1/gcc_64
+  QT_ANDROID_DIR: ${{ github.workspace }}/.qt/Qt/6.9.1/android_arm64_v8a
+
+  # Meson options
+  MESON_OPTIONS: >
+    -Dauto_features=disabled
+    -Dintrospection=disabled
+    -Dtests=disabled
+    -Dexamples=disabled
+    -Dgtk_doc=disabled
+    -Dgpl=enabled
+    -Dlibav=enabled
+    -Dgood=enabled
+    -Dgst-plugins-base:app=enabled
+    -Dgst-plugins-base:playback=enabled
+    -Dgst-plugins-base:video=enabled
+    -Dgst-plugins-base:audio=enabled
+    -Dgst-plugins-base:typefind=enabled
+    -Dgst-plugins-base:codecparsers=enabled
+    -Dgst-plugins-base:gl=enabled
+    -Dgst-full=enabled
+    -Dgst-full-target-type=static_library
+    -Dgst-full-libraries=app,video,audio,gl,codecparsers
+
+  # Toggle this later to "enabled" once your branch has the clean Qt detection.
+  QT6_PLUGIN_TOGGLE: "disabled"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Set QT6 toggle from dispatch input (optional)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          if [ "${{ inputs.enable_qt6_plugin }}" = "true" ]; then
+            echo "QT6_PLUGIN_TOGGLE=enabled" >> $GITHUB_ENV
+          fi
+
+      - name: Install base deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential python3 python3-pip git cmake ninja-build \
+            pkg-config yasm curl ca-certificates unzip \
+            autoconf automake libtool
+          python3 -m pip install --user --upgrade pip
+          python3 -m pip install --user "meson>=1.4" "aqtinstall==3.3.0"
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          meson --version
+          ninja --version
+          cmake --version
+
+      - name: Fetch Android NDK ${{ env.NDK_VERSION }}
+        run: |
+          sudo mkdir -p /opt/android
+          cd /opt/android
+          curl -L -o android-ndk-${NDK_VERSION}-linux.zip \
+            https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip
+          sudo unzip -q android-ndk-${NDK_VERSION}-linux.zip
+          sudo mv android-ndk-${NDK_VERSION} ndk-${NDK_VERSION}
+          echo "ANDROID_NDK=${{ env.NDK_DIR }}" >> $GITHUB_ENV
+
+      - name: Install Qt (desktop + Android kit)
+        run: |
+          python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 -O /opt/Qt
+          # Android kit goes to a user-writable dir to avoid sudo
+          python3 -m aqt install-qt linux android "${QT_VERSION}" android_arm64_v8a --outputdir "${{ github.workspace }}/.qt/Qt"
+          test -f "${QT_ANDROID_DIR}/lib/cmake/Qt6/Qt6Config.cmake" || (echo "Qt Android kit missing" && exit 1)
+
+      - name: Prepare dirs and env
+        run: |
+          mkdir -p "${PREFIX}" "${SRC_DIR}"
+          echo "PKG_CONFIG_LIBDIR=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig:${PREFIX}/lib/gstreamer-1.0/pkgconfig" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=${PKG_CONFIG_LIBDIR}" >> $GITHUB_ENV
+          echo "PATH=${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec:${PATH}" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=${QT_ANDROID_DIR}:${CMAKE_PREFIX_PATH}" >> $GITHUB_ENV
+
+      - name: Build x264 (static, PIC)
+        working-directory: ${{ env.SRC_DIR }}
+        run: |
+          set -eux
+          git clone --depth=1 https://code.videolan.org/videolan/x264.git
+          cd x264
+          TOOL="${ANDROID_NDK}/toolchains/llvm/prebuilt/linux-x86_64"
+          API="${API_LEVEL}"
+          TARGET=aarch64-linux-android
+          export CC="${TOOL}/bin/${TARGET}${API}-clang"
+          export AR="${TOOL}/bin/llvm-ar"
+          export RANLIB="${TOOL}/bin/llvm-ranlib"
+          export STRIP="${TOOL}/bin/llvm-strip"
+          ./configure \
+            --host="${TARGET}" \
+            --sysroot="${TOOL}/sysroot" \
+            --prefix="${PREFIX}" \
+            --enable-static \
+            --enable-pic \
+            --disable-cli
+          make -j"$(nproc)"
+          make install
+          PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig" pkg-config --modversion x264
+
+      - name: Build FFmpeg 7.1 (static) with x264
+        working-directory: ${{ env.SRC_DIR }}
+        run: |
+          set -eux
+          curl -L -o ffmpeg-7.1.tar.xz https://www.ffmpeg.org/releases/ffmpeg-7.1.tar.xz
+          tar -xf ffmpeg-7.1.tar.xz
+          cd ffmpeg-7.1
+          TOOL="${ANDROID_NDK}/toolchains/llvm/prebuilt/linux-x86_64"
+          API="${API_LEVEL}"
+          TARGET=aarch64-linux-android
+          SYSROOT="${TOOL}/sysroot"
+          CC="${TOOL}/bin/${TARGET}${API}-clang"
+          CXX="${TOOL}/bin/${TARGET}${API}-clang++"
+          AR="${TOOL}/bin/llvm-ar"
+          RANLIB="${TOOL}/bin/llvm-ranlib"
+          STRIP="${TOOL}/bin/llvm-strip"
+          PKG_CONFIG_LIBDIR="${PKG_CONFIG_LIBDIR}" \
+          ./configure \
+            --prefix="${PREFIX}" \
+            --pkg-config-flags="--static" \
+            --ar="${AR}" --ranlib="${RANLIB}" --strip="${STRIP}" \
+            --cc="${CC}" --cxx="${CXX}" \
+            --target-os=android --arch=aarch64 --cpu=armv8-a \
+            --sysroot="${SYSROOT}" --enable-cross-compile \
+            --enable-gpl --enable-libx264 \
+            --enable-static --disable-shared \
+            --disable-programs --disable-doc --disable-debug
+          make -j"$(nproc)"
+          make install
+          PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig" pkg-config --modversion libavcodec
+
+      - name: Create Meson cross file (android-aarch64.ini)
+        working-directory: ${{ github.workspace }}
+        run: |
+          TOOL="${ANDROID_NDK}/toolchains/llvm/prebuilt/linux-x86_64"
+          API="${API_LEVEL}"
+          TARGET=aarch64-linux-android
+          cat > android-aarch64.ini <<EOF
+          [binaries]
+          c = '${TOOL}/bin/${TARGET}${API}-clang'
+          cpp = '${TOOL}/bin/${TARGET}${API}-clang++'
+          ar = '${TOOL}/bin/llvm-ar'
+          strip = '${TOOL}/bin/llvm-strip'
+          pkgconfig = '/usr/bin/pkg-config'
+
+          [properties]
+          needs_exe_wrapper = true
+          c_args = ['-fPIC', '--sysroot=${TOOL}/sysroot']
+          c_link_args = ['--sysroot=${TOOL}/sysroot']
+
+          [host_machine]
+          system = 'android'
+          cpu_family = 'aarch64'
+          cpu = 'armv8'
+          endian = 'little'
+          EOF
+          echo "Wrote android-aarch64.ini:"
+          cat android-aarch64.ini
+
+      - name: Configure & build GStreamer (Amy branch) for Android
+        run: |
+          set -eux
+          # We expect this workflow file to live inside your fork of Amy's branch.
+          # If this repo is something else, add a 'git clone' here.
+          mkdir -p build-android-a64
+          meson setup build-android-a64 \
+            --prefix "${PREFIX}" \
+            --cross-file "${GITHUB_WORKSPACE}/android-aarch64.ini" \
+            --default-library=static \
+            ${MESON_OPTIONS} \
+            -Dgood=enabled \
+            -Dgst-plugins-good:qt6=${QT6_PLUGIN_TOGGLE}
+          ninja -C build-android-a64
+          ninja -C build-android-a64 install
+
+      - name: Verify artifacts
+        run: |
+          set -eux
+          test -f "${PREFIX}/lib/libgstreamer-full-1.0.a"
+          PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig" pkg-config --modversion gstreamer-full-1.0
+          echo "Installed libs:"
+          ls -1 "${PREFIX}/lib" | sed -n '1,200p'
+          echo "Plugins:"
+          ls -1 "${PREFIX}/lib/gstreamer-1.0" || true
+
+      - name: Package artifacts
+        run: |
+          tar -C "${PREFIX}/.." -czf "${{ github.workspace }}/gst-android-aarch64.tar.gz" "$(basename "${PREFIX}")"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gst-android-aarch64
+          path: gst-android-aarch64.tar.gz
+          if-no-files-found: error
