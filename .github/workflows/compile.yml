@@ -94,7 +94,7 @@ jobs:
             build-essential python3 python3-pip git cmake ninja-build \
             pkg-config yasm curl ca-certificates unzip \
             autoconf automake libtool ccache \
-            libegl1 libopengl0
+            libegl1 libopengl0 libgl1
           python3 -m pip install --user --upgrade pip
           python3 -m pip install --user "meson>=1.4" "aqtinstall==3.3.0"
           echo "$HOME/.local/bin" >> $GITHUB_PATH
@@ -121,9 +121,9 @@ jobs:
 
       - name: Install / restore Qt (host + android)
         run: |
-          # Host Qt
+          # Host Qt (+ qsb via qtshadertools)
           if [ ! -d "${QT_HOST_DIR}" ]; then
-            python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 -O "${WORK_ROOT}/.qt-host"
+            python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 -O "${WORK_ROOT}/.qt-host" -m qtshadertools
           fi
           # Android Qt
           if [ ! -d "${QT_ANDROID_DIR}" ]; then
@@ -213,7 +213,7 @@ jobs:
           ar = '${TOOL}/bin/llvm-ar'
           strip = '${TOOL}/bin/llvm-strip'
           pkg-config = '/usr/bin/pkg-config'
-          # IMPORTANT: qmake is TARGET (Android) and belongs in the CROSS file
+          # TARGET qmake (Android) belongs in the CROSS file
           qmake6 = '${QT_ANDROID_DIR}/bin/qmake6'
           qmake  = '${QT_ANDROID_DIR}/bin/qmake6'
 
@@ -256,18 +256,18 @@ jobs:
           set -eux
           export PATH="${QT_ANDROID_DIR}/bin:${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec:${PATH}"
           export QT_HOST_PATH="${QT_HOST_DIR}"
-          # Safe even when LD_LIBRARY_PATH is unset (because of `set -u`)
+          # Guarded export so it works even if LD_LIBRARY_PATH was unset
           export LD_LIBRARY_PATH="${QT_HOST_DIR}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
           which qmake6
           qmake6 -query QT_INSTALL_PREFIX
           qtpaths6 -query QT_HOST_BINS || true
           which qsb
-          qsb --version || true
+          qsb --version
           qmake6 -v || true
 
           rm -rf build-android-a64
-          # Force the pip Meson, not /usr/bin/meson
+          # Force pip's Meson, not /usr/bin/meson
           python3 -m mesonbuild.mesonmain setup build-android-a64 \
             --prefix "$PREFIX" \
             --cross-file "$GITHUB_WORKSPACE/android-aarch64.ini" \
