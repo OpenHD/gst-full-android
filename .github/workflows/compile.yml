@@ -257,7 +257,16 @@ jobs:
           
           # qtpaths should point host bins correctly
           qtpaths6 -query QT_HOST_BINS
-  
+
+          ls -a /home/runner/work/gst-full-android/gst-full-android/.qt-android/Qt/
+          echo"__________________________________________________________________"
+          ls -a /home/runner/work/gst-full-android/gst-full-android/.qt-android/Qt/6.9.1/
+          echo"__________________________________________________________________"
+          ls -a /home/runner/work/gst-full-android/gst-full-android/.qt-android/Qt/6.9.1/gcc_64/
+          echo"__________________________________________________________________"
+          ls -a /home/runner/work/gst-full-android/gst-full-android/.qt-android/Qt/6.9.1/gcc_64/bin/
+          echo"__________________________________________________________________"
+
           
           mkdir -p build-android-a64
           meson setup build-android-a64 \
