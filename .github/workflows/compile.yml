@@ -139,6 +139,8 @@ jobs:
                   "${GITHUB_WORKSPACE}/.qt-android/Qt/${QT_VERSION}/gcc_64"
           # PATH: Android wrappers first, then host tools
           echo "${QT_ANDROID_DIR}/bin:${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec" >> "$GITHUB_PATH"
+          # Also expose host kit to Qt explicitly
+          echo "QT_HOST_PATH=${QT_HOST_DIR}" >> $GITHUB_ENV
 
       - name: Prepare env
         run: |
@@ -234,11 +236,13 @@ jobs:
           EOF
           cat android-aarch64.ini
 
-      - name: Create Meson native file for host Qt tools
+      - name: Create Meson native file for host/qt tools (pin qmake6)
         working-directory: ${{ github.workspace }}
         run: |
           cat > native-qt.ini <<EOF
           [binaries]
+          # Use the ANDROID qmake6 wrapper explicitly (version >=6), and host tools for moc/uic/rcc
+          qmake6   = '${QT_ANDROID_DIR}/bin/qmake6'
           moc      = '${QT_HOST_DIR}/libexec/moc'
           uic      = '${QT_HOST_DIR}/bin/uic'
           rcc      = '${QT_HOST_DIR}/bin/rcc'
@@ -252,11 +256,14 @@ jobs:
       - name: Configure & build GStreamer with qt6qmlgl
         run: |
           set -eux
+          # PATH and env for this step (Actions already extended PATH, but be explicit)
+          export PATH="${QT_ANDROID_DIR}/bin:${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec:${PATH}"
+          export QT_HOST_PATH="${QT_HOST_DIR}"
+
           which qmake6
-          which qtpaths6
-          which moc
-          qmake6 -query QT_INSTALL_PREFIX     # should be the Android kit
-          qtpaths6 -query QT_HOST_BINS        # should be .../gcc_64/bin
+          qmake6 -query QT_INSTALL_PREFIX
+          qtpaths6 -query QT_HOST_BINS
+          qmake6 -v || true
 
           rm -rf build-android-a64
           meson setup build-android-a64 \
@@ -265,8 +272,7 @@ jobs:
             --native-file "$GITHUB_WORKSPACE/native-qt.ini" \
             --default-library=static \
             $MESON_OPTIONS \
-            -Dgst-plugins-good:qt6=enabled \
-            -Dqt-method=qmake
+            -Dqt-method=auto
 
           ninja -C build-android-a64 -j"$(nproc)"
           ninja -C build-android-a64 install
