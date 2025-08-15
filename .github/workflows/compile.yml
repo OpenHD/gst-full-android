@@ -37,10 +37,13 @@ env:
     -Dgst-plugins-base:typefind=enabled
     -Dgst-plugins-base:codecparsers=enabled
     -Dgst-plugins-base:gl=enabled
+    -Dgst-plugins-base:gl_platforms=egl
+    -Dgst-plugins-base:gl_apis=gles2
     -Dgst-full=enabled
     -Dgst-full-target-type=static_library
     -Dgst-full-libraries=app,video,audio,gl,codecparsers
     -Dgst-plugins-good:qt6=enabled
+    -Dgst-plugins-good:qt-android=enabled
 
 jobs:
   build:
@@ -242,7 +245,7 @@ jobs:
           [binaries]
           moc      = '${QT_HOST_DIR}/libexec/moc'
           uic      = '${QT_HOST_DIR}/bin/uic'
-          rcc      = '${QT_HOST_DIR}/bin/rcc'
+          rcc      = '${QT_HOST_DIR}/libexec/rcc'
           qsb      = '${QT_HOST_DIR}/bin/qsb'
           qtpaths6 = '${QT_HOST_DIR}/bin/qtpaths6'
           cmake    = '/usr/bin/cmake'
@@ -256,7 +259,6 @@ jobs:
           set -eux
           export PATH="${QT_ANDROID_DIR}/bin:${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec:${PATH}"
           export QT_HOST_PATH="${QT_HOST_DIR}"
-          # Guarded export so it works even if LD_LIBRARY_PATH was unset
           export LD_LIBRARY_PATH="${QT_HOST_DIR}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
           which qmake6
