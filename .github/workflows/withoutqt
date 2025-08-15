@@ -1,0 +1,235 @@
+name: android-gst-full
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+env:
+  API_LEVEL: "35"
+  NDK_VERSION: "r27c"
+
+  WORK_ROOT: ${{ github.workspace }}
+  NDK_DIR: ${{ github.workspace }}/.ndk/ndk-r27c
+
+  PREFIX: ${{ github.workspace }}/prefix/aarch64
+  SRC_DIR: ${{ github.workspace }}/src
+
+  MESON_OPTIONS: >
+    -Dauto_features=disabled
+    -Dintrospection=disabled
+    -Dtests=disabled
+    -Dexamples=disabled
+    -Dgtk_doc=disabled
+    -Dgpl=enabled
+    -Dlibav=enabled
+    -Dgood=enabled
+    -Dgst-plugins-base:app=enabled
+    -Dgst-plugins-base:playback=enabled
+    -Dgst-plugins-base:video=enabled
+    -Dgst-plugins-base:audio=enabled
+    -Dgst-plugins-base:typefind=enabled
+    -Dgst-plugins-base:codecparsers=enabled
+    -Dgst-plugins-base:gl=enabled
+    -Dgst-plugins-base:gl_platforms=egl
+    -Dgst-plugins-base:gl_apis=gles2
+    -Dgst-full=enabled
+    -Dgst-full-target-type=static_library
+    -Dgst-full-libraries=app,video,audio,gl,codecparsers
+    -Dgst-plugins-good:qt6=disabled
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      # ---------- CACHES ----------
+      - name: Restore ccache cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ runner.os }}-${{ env.NDK_VERSION }}-${{ env.API_LEVEL }}-${{ hashFiles('android-aarch64.ini','subprojects/**','**/meson.build','**/meson_options.txt','.github/workflows/android-gst-full.yml') }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ env.NDK_VERSION }}-${{ env.API_LEVEL }}-
+
+      - name: Restore NDK
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.NDK_DIR }}
+          key: ndk-${{ runner.os }}-${{ env.NDK_VERSION }}
+
+      - name: Restore pip cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('**/requirements*.txt','.github/workflows/android-gst-full.yml') }}
+          restore-keys: |
+            pip-${{ runner.os }}-
+
+      # ---------- SETUP ----------
+      - name: Install base deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential python3 python3-pip git cmake ninja-build \
+            pkg-config yasm curl ca-certificates unzip \
+            autoconf automake libtool ccache
+          python3 -m pip install --user --upgrade pip
+          python3 -m pip install --user "meson>=1.4"
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Configure ccache
+        run: |
+          mkdir -p ~/.cache/ccache
+          ccache --set-config=cache_dir=~/.cache/ccache
+          ccache --max-size=10G
+          ccache --set-config=compression=true
+          ccache --set-config=compiler_check=content
+          ccache --zero-stats || true
+
+      - name: Install / restore Android NDK r27c
+        run: |
+          if [ ! -d "${NDK_DIR}" ]; then
+            mkdir -p "${WORK_ROOT}/.ndk"
+            cd "${WORK_ROOT}/.ndk"
+            curl -L -o ndk.zip https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip
+            unzip -q ndk.zip
+            mv android-ndk-${NDK_VERSION} ndk-${NDK_VERSION}
+          fi
+          echo "ANDROID_NDK=${NDK_DIR}" >> $GITHUB_ENV
+
+      - name: Prepare env
+        run: |
+          mkdir -p "${PREFIX}" "${SRC_DIR}"
+          echo "PKG_CONFIG_LIBDIR=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig:${PREFIX}/lib/gstreamer-1.0/pkgconfig" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig" >> $GITHUB_ENV
+
+      # ---------- BUILD DEPS ----------
+      - name: Build x264 (static, PIC, with ccache)
+        working-directory: ${{ env.SRC_DIR }}
+        run: |
+          set -eux
+          git clone --depth=1 https://code.videolan.org/videolan/x264.git
+          cd x264
+          TOOL="${ANDROID_NDK}/toolchains/llvm/prebuilt/linux-x86_64"
+          API="${API_LEVEL}"
+          TARGET=aarch64-linux-android
+          export CC="ccache ${TOOL}/bin/${TARGET}${API}-clang"
+          export AR="${TOOL}/bin/llvm-ar"
+          export RANLIB="${TOOL}/bin/llvm-ranlib"
+          export STRIP="${TOOL}/bin/llvm-strip"
+          ./configure \
+            --host="${TARGET}" \
+            --sysroot="${TOOL}/sysroot" \
+            --prefix="${PREFIX}" \
+            --enable-static \
+            --enable-pic \
+            --disable-cli
+          make -j"$(nproc)"
+          make install
+          PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig" pkg-config --modversion x264
+
+      - name: Build FFmpeg 7.1 (static, with ccache)
+        working-directory: ${{ env.SRC_DIR }}
+        run: |
+          set -eux
+          curl -L -o ffmpeg-7.1.tar.xz https://www.ffmpeg.org/releases/ffmpeg-7.1.tar.xz
+          tar -xf ffmpeg-7.1.tar.xz
+          cd ffmpeg-7.1
+          TOOL="${ANDROID_NDK}/toolchains/llvm/prebuilt/linux-x86_64"
+          API="${API_LEVEL}"
+          TARGET=aarch64-linux-android
+          SYSROOT="${TOOL}/sysroot"
+          CC="ccache ${TOOL}/bin/${TARGET}${API}-clang"
+          CXX="ccache ${TOOL}/bin/${TARGET}${API}-clang++"
+          AR="${TOOL}/bin/llvm-ar"
+          RANLIB="${TOOL}/bin/llvm-ranlib"
+          STRIP="${TOOL}/bin/llvm-strip"
+          PKG_CONFIG_LIBDIR="${PKG_CONFIG_LIBDIR}" \
+          ./configure \
+            --prefix="${PREFIX}" \
+            --pkg-config-flags="--static" \
+            --ar="${AR}" --ranlib="${RANLIB}" --strip="${STRIP}" \
+            --cc="${CC}" --cxx="${CXX}" \
+            --target-os=android --arch=aarch64 --cpu=armv8-a \
+            --sysroot="${SYSROOT}" --enable-cross-compile \
+            --enable-gpl --enable-libx264 \
+            --enable-static --disable-shared \
+            --disable-programs --disable-doc --disable-debug
+          make -j"$(nproc)"
+          make install
+
+      # ---------- MESON CROSS ----------
+      - name: Create Meson cross file (android-aarch64.ini)
+        working-directory: ${{ github.workspace }}
+        run: |
+          TOOL="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64"
+          API="${API_LEVEL}"
+          TARGET=aarch64-linux-android
+          cat > android-aarch64.ini <<EOF
+          [binaries]
+          c = ['ccache', '${TOOL}/bin/${TARGET}${API}-clang']
+          cpp = ['ccache', '${TOOL}/bin/${TARGET}${API}-clang++']
+          ar = '${TOOL}/bin/llvm-ar'
+          strip = '${TOOL}/bin/llvm-strip'
+          pkg-config = '/usr/bin/pkg-config'
+
+          [built-in options]
+          c_args = ['-fPIC', '--sysroot=${TOOL}/sysroot']
+          cpp_args = ['-fPIC', '--sysroot=${TOOL}/sysroot']
+          c_link_args = ['--sysroot=${TOOL}/sysroot']
+          cpp_link_args = ['--sysroot=${TOOL}/sysroot']
+
+          [host_machine]
+          system = 'android'
+          cpu_family = 'aarch64'
+          cpu = 'aarch64'
+          endian = 'little'
+
+          [properties]
+          needs_exe_wrapper = true
+          sys_root = '${TOOL}/sysroot'
+          EOF
+          cat android-aarch64.ini
+
+      # ---------- GSTREAMER ----------
+      - name: Configure & build GStreamer (NO Qt/QML)
+        run: |
+          set -eux
+          rm -rf build-android-a64
+          # Force the pip Meson
+          python3 -m mesonbuild.mesonmain setup build-android-a64 \
+            --prefix "$PREFIX" \
+            --cross-file "$GITHUB_WORKSPACE/android-aarch64.ini" \
+            --default-library=static \
+            $MESON_OPTIONS
+
+          ninja -C build-android-a64 -j"$(nproc)"
+          ninja -C build-android-a64 install
+
+      - name: Verify artifacts
+        run: |
+          set -eux
+          test -f "${PREFIX}/lib/libgstreamer-full-1.0.a"
+          ls -l "${PREFIX}/lib/gstreamer-1.0" || true
+          PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig" pkg-config --modversion gstreamer-full-1.0 || true
+
+      - name: ccache stats
+        run: ccache --show-stats || true
+
+      - name: Package artifacts
+        run: |
+          tar -C "${PREFIX}/.." -czf "${{ github.workspace }}/gst-android-aarch64.tar.gz" "$(basename "${PREFIX}")"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gst-android-aarch64
+          path: gst-android-aarch64.tar.gz
+          if-no-files-found: error
