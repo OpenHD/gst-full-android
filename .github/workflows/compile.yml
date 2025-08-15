@@ -45,7 +45,6 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -133,13 +132,9 @@ jobs:
       - name: Bridge Android qmake6 wrapper to host Qt (symlink + PATH)
         run: |
           set -eux
-          # The Android qmake6 wrapper expects a sibling .../Qt/6.9.1/gcc_64
           mkdir -p "${GITHUB_WORKSPACE}/.qt-android/Qt/${QT_VERSION}"
-          ln -sfn "${QT_HOST_DIR}" \
-                  "${GITHUB_WORKSPACE}/.qt-android/Qt/${QT_VERSION}/gcc_64"
-          # PATH: Android wrappers first, then host tools
+          ln -sfn "${QT_HOST_DIR}" "${GITHUB_WORKSPACE}/.qt-android/Qt/${QT_VERSION}/gcc_64"
           echo "${QT_ANDROID_DIR}/bin:${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec" >> "$GITHUB_PATH"
-          # Also expose host kit to Qt explicitly
           echo "QT_HOST_PATH=${QT_HOST_DIR}" >> $GITHUB_ENV
 
       - name: Prepare env
@@ -203,7 +198,7 @@ jobs:
           make -j"$(nproc)"
           make install
 
-      # ---------- MESON CROSS + NATIVE (with ccache) ----------
+      # ---------- MESON CROSS + NATIVE ----------
       - name: Create Meson cross file (android-aarch64.ini)
         working-directory: ${{ github.workspace }}
         run: |
@@ -217,6 +212,9 @@ jobs:
           ar = '${TOOL}/bin/llvm-ar'
           strip = '${TOOL}/bin/llvm-strip'
           pkg-config = '/usr/bin/pkg-config'
+          # IMPORTANT: qmake is TARGET (Android) and belongs in the CROSS file
+          qmake6 = '${QT_ANDROID_DIR}/bin/qmake6'
+          qmake  = '${QT_ANDROID_DIR}/bin/qmake6'
 
           [built-in options]
           c_args = ['-fPIC', '--sysroot=${TOOL}/sysroot']
@@ -236,19 +234,17 @@ jobs:
           EOF
           cat android-aarch64.ini
 
-      - name: Create Meson native file for host/qt tools (pin qmake6)
+      - name: Create Meson native file for host Qt tools
         working-directory: ${{ github.workspace }}
         run: |
           cat > native-qt.ini <<EOF
           [binaries]
-          # Use the ANDROID qmake6 wrapper explicitly (version >=6), and host tools for moc/uic/rcc
-          qmake6   = '${QT_ANDROID_DIR}/bin/qmake6'
           moc      = '${QT_HOST_DIR}/libexec/moc'
           uic      = '${QT_HOST_DIR}/bin/uic'
           rcc      = '${QT_HOST_DIR}/bin/rcc'
           qtpaths6 = '${QT_HOST_DIR}/bin/qtpaths6'
           cmake    = '/usr/bin/cmake'
-          pkg-config= '/usr/bin/pkg-config'
+          pkg-config = '/usr/bin/pkg-config'
           EOF
           cat native-qt.ini
 
@@ -256,23 +252,25 @@ jobs:
       - name: Configure & build GStreamer with qt6qmlgl
         run: |
           set -eux
-          # PATH and env for this step (Actions already extended PATH, but be explicit)
           export PATH="${QT_ANDROID_DIR}/bin:${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec:${PATH}"
           export QT_HOST_PATH="${QT_HOST_DIR}"
 
           which qmake6
           qmake6 -query QT_INSTALL_PREFIX
-          qtpaths6 -query QT_HOST_BINS
+          qtpaths6 -query QT_HOST_BINS || true
           qmake6 -v || true
 
           rm -rf build-android-a64
-          meson setup build-android-a64 \
+          # Force the pip Meson, not /usr/bin/meson
+          python3 -m mesonbuild.mesonmain setup build-android-a64 \
             --prefix "$PREFIX" \
             --cross-file "$GITHUB_WORKSPACE/android-aarch64.ini" \
             --native-file "$GITHUB_WORKSPACE/native-qt.ini" \
             --default-library=static \
             $MESON_OPTIONS \
-            -Dqt-method=auto
+            -Dqt-method=auto \
+            -Dqt:qt_host_path="$QT_HOST_DIR" \
+            -Dqt:cmake_module_path="$QT_ANDROID_DIR/lib/cmake;$QT_ANDROID_DIR/lib/cmake/Qt6"
 
           ninja -C build-android-a64 -j"$(nproc)"
           ninja -C build-android-a64 install
@@ -285,8 +283,7 @@ jobs:
           PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig" pkg-config --modversion gstreamer-full-1.0 || true
 
       - name: ccache stats
-        run: |
-          ccache --show-stats || true
+        run: ccache --show-stats || true
 
       - name: Package artifacts
         run: |
