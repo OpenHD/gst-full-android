@@ -129,6 +129,24 @@ jobs:
           if [ ! -d "${QT_ANDROID_DIR}" ]; then
             python3 -m aqt install-qt linux android "${QT_VERSION}" android_arm64_v8a -O "${WORK_ROOT}/.qt-android/Qt"
           fi
+          
+      - name: Bridge Android qmake6 wrapper to host Qt (symlink + PATH)
+        run: |
+          set -eux
+          # Make the sibling host kit path that the Android wrapper expects:
+          #   .qt-android/Qt/6.9.1/gcc_64  ->  .qt-host/6.9.1/gcc_64
+          mkdir -p "${GITHUB_WORKSPACE}/.qt-android/Qt/${QT_VERSION}"
+          ln -sfn "${QT_HOST_DIR}" \
+                  "${GITHUB_WORKSPACE}/.qt-android/Qt/${QT_VERSION}/gcc_64"
+
+          # Ensure wrappers + host tools are on PATH for subsequent steps
+          export PATH="${QT_ANDROID_DIR}/bin:${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec:${PATH}"
+          echo "${QT_ANDROID_DIR}/bin:${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec" >> "$GITHUB_PATH"
+
+          # Quick sanity (wrapper should report Android prefix; qtpaths reports host bins)
+          qmake6 -query QT_INSTALL_PREFIX
+          qtpaths6 -query QT_HOST_BINS
+
 
       - name: Prepare env
         run: |
