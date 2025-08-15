@@ -239,15 +239,37 @@ jobs:
       - name: Configure & build GStreamer with qt6qmlgl
         run: |
           set -eux
+
+          # Adjust these to your CI paths
+          export QT_HOST_DIR="$GITHUB_WORKSPACE/.qt-host/6.9.1/gcc_64"
+          export QT_ANDROID_DIR="$GITHUB_WORKSPACE/.qt-android/Qt/6.9.1/android_arm64_v8a"
+          
+          # Put Android kit wrappers FIRST, then host tools
+          export PATH="$QT_ANDROID_DIR/bin:$QT_HOST_DIR/bin:$QT_HOST_DIR/libexec:$PATH"
+          
+          # Quick sanity checks (must succeed)
+          which qmake6 || echo "qmake6 not on PATH"
+          which qtpaths6 || echo "qtpaths6 not on PATH"
+          which moc || echo "moc not on PATH"
+          
+          # qmake6 should be the ANDROID kit wrapper; this should print the android_arm64_v8a prefix
+          qmake6 -query QT_INSTALL_PREFIX
+          
+          # qtpaths should point host bins correctly
+          qtpaths6 -query QT_HOST_BINS
+  
+          
           mkdir -p build-android-a64
           meson setup build-android-a64 \
-            --prefix "${PREFIX}" \
-            --cross-file "${GITHUB_WORKSPACE}/android-aarch64.ini" \
-            --native-file "${GITHUB_WORKSPACE}/native-qt.ini" \
+            --prefix "$PREFIX" \
+            --cross-file "$GITHUB_WORKSPACE/android-aarch64.ini" \
+            --native-file "$GITHUB_WORKSPACE/native-qt.ini" \
             --default-library=static \
-            ${MESON_OPTIONS} \
-            -Dqt:qt_host_path="${QT_HOST_DIR}" \
-            -Dqt:cmake_module_path="${QT_ANDROID_DIR}/lib/cmake;${QT_ANDROID_DIR}/lib/cmake/Qt6"
+            -Dgst-plugins-good:qt6=enabled \
+            -Dqt-method=config-tool \
+            -Dqt:qt_host_path="$QT_HOST_DIR" \
+            -Dqt:cmake_module_path="$QT_ANDROID_DIR/lib/cmake;$QT_ANDROID_DIR/lib/cmake/Qt6"
+          
           ninja -C build-android-a64
           ninja -C build-android-a64 install
 
