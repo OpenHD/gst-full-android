@@ -241,13 +241,13 @@ jobs:
           set -eux
 
           ls -a /home/runner/work/gst-full-android/gst-full-android/.qt-android/Qt/
-          echo"__________________________________________________________________"
+          echo "__________________________________________________________________"
           ls -a /home/runner/work/gst-full-android/gst-full-android/.qt-android/Qt/6.9.1/
-          echo"__________________________________________________________________"
+          echo "__________________________________________________________________"
           ls -a /home/runner/work/gst-full-android/gst-full-android/.qt-android/Qt/6.9.1/gcc_64/
-          echo"__________________________________________________________________"
+          echo "__________________________________________________________________"
           ls -a /home/runner/work/gst-full-android/gst-full-android/.qt-android/Qt/6.9.1/gcc_64/bin/
-          echo"__________________________________________________________________"
+          echo "__________________________________________________________________"
 
           # Adjust these to your CI paths
           export QT_HOST_DIR="$GITHUB_WORKSPACE/.qt-host/6.9.1/gcc_64"
