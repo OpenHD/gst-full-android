@@ -39,6 +39,7 @@ env:
     -Dgst-plugins-base:gl=enabled
     -Dgst-plugins-base:gl_platforms=egl
     -Dgst-plugins-base:gl_apis=gles2
+    -Dgst-plugins-base:gl_winsys=android
     -Dgst-full=enabled
     -Dgst-full-target-type=static_library
     -Dgst-full-libraries=app,video,audio,gl,codecparsers
@@ -90,9 +91,8 @@ jobs:
             pip-${{ runner.os }}-
 
       # ---------- SETUP ----------
-      - name: Install base deps
+      - name: Install base deps (incl. libEGL for qsb)
         run: |
-          set -eux
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential python3 python3-pip git cmake ninja-build \
@@ -114,29 +114,24 @@ jobs:
 
       - name: Install / restore Android NDK r27c
         run: |
-          set -eux
           if [ ! -d "${NDK_DIR}" ]; then
             mkdir -p "${WORK_ROOT}/.ndk"
             cd "${WORK_ROOT}/.ndk"
-            curl -L -o ndk.zip "https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip"
+            curl -L -o ndk.zip https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip
             unzip -q ndk.zip
-            mv "android-ndk-${NDK_VERSION}" "ndk-${NDK_VERSION}"
+            mv android-ndk-${NDK_VERSION} ndk-${NDK_VERSION}
           fi
           echo "ANDROID_NDK=${NDK_DIR}" >> $GITHUB_ENV
 
       - name: Install / restore Qt (host + android)
         run: |
-          set -eux
-          # Host Qt (include Shader Tools -> qsb)
+          # Host Qt
           if [ ! -d "${QT_HOST_DIR}" ]; then
-            python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 \
-              -O "${WORK_ROOT}/.qt-host" -m qtshadertools
+            python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 -O "${WORK_ROOT}/.qt-host"
           fi
-          test -x "${QT_HOST_DIR}/bin/qsb" || (echo "qsb missing in host kit" && ls -l "${QT_HOST_DIR}/bin" && exit 1)
           # Android Qt
           if [ ! -d "${QT_ANDROID_DIR}" ]; then
-            python3 -m aqt install-qt linux android "${QT_VERSION}" android_arm64_v8a \
-              -O "${WORK_ROOT}/.qt-android/Qt"
+            python3 -m aqt install-qt linux android "${QT_VERSION}" android_arm64_v8a -O "${WORK_ROOT}/.qt-android/Qt"
           fi
 
       - name: Bridge Android qmake6 wrapper to host Qt (symlink + PATH)
@@ -149,7 +144,6 @@ jobs:
 
       - name: Prepare env
         run: |
-          set -eux
           mkdir -p "${PREFIX}" "${SRC_DIR}"
           echo "PKG_CONFIG_LIBDIR=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig:${PREFIX}/lib/gstreamer-1.0/pkgconfig" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig" >> $GITHUB_ENV
@@ -213,7 +207,6 @@ jobs:
       - name: Create Meson cross file (android-aarch64.ini)
         working-directory: ${{ github.workspace }}
         run: |
-          set -eux
           TOOL="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64"
           API="${API_LEVEL}"
           TARGET=aarch64-linux-android
@@ -248,13 +241,14 @@ jobs:
       - name: Create Meson native file for host Qt tools
         working-directory: ${{ github.workspace }}
         run: |
-          set -eux
           cat > native-qt.ini <<EOF
           [binaries]
           moc      = '${QT_HOST_DIR}/libexec/moc'
           uic      = '${QT_HOST_DIR}/libexec/uic'
           rcc      = '${QT_HOST_DIR}/libexec/rcc'
-          qsb      = '${QT_HOST_DIR}/bin/qsb'
+          qmltyperegistrar = '${QT_HOST_DIR}/libexec/qmltyperegistrar'
+          qmlcachegen = '${QT_HOST_DIR}/libexec/qmlcachegen'
+          lrelease = '${QT_HOST_DIR}/bin/lrelease'
           qtpaths6 = '${QT_HOST_DIR}/bin/qtpaths6'
           cmake    = '/usr/bin/cmake'
           pkg-config = '/usr/bin/pkg-config'
@@ -262,13 +256,12 @@ jobs:
           cat native-qt.ini
 
       # ---------- GSTREAMER ----------
-      - name: Configure & build GStreamer with qt6 (Android)
+      - name: Configure & build GStreamer with Qt6/QML (Android)
         run: |
           set -eux
-          export LD_LIBRARY_PATH="${QT_HOST_DIR}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           export PATH="${QT_ANDROID_DIR}/bin:${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec:${PATH}"
           export QT_HOST_PATH="${QT_HOST_DIR}"
-          export CMAKE_PREFIX_PATH="${QT_ANDROID_DIR}"
+          export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:${QT_HOST_DIR}/lib"
 
           which qmake6
           qmake6 -query QT_INSTALL_PREFIX
