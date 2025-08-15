@@ -118,15 +118,23 @@ jobs:
           fi
           echo "ANDROID_NDK=${NDK_DIR}" >> $GITHUB_ENV
 
-      - name: Install / restore Qt (host + android)
+      - name: Install / restore Qt (host + android, plus Shader Tools for qsb)
         run: |
-          # Host Qt
+          # Host Qt (ensure qtshadertools so qsb is available)
           if [ ! -d "${QT_HOST_DIR}" ]; then
-            python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 -O "${WORK_ROOT}/.qt-host"
+            python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 \
+              -O "${WORK_ROOT}/.qt-host" -m qtshadertools
+          else
+            if [ ! -x "${QT_HOST_DIR}/bin/qsb" ]; then
+              python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 \
+                -O "${WORK_ROOT}/.qt-host" -m qtshadertools
+            fi
           fi
+
           # Android Qt
           if [ ! -d "${QT_ANDROID_DIR}" ]; then
-            python3 -m aqt install-qt linux android "${QT_VERSION}" android_arm64_v8a -O "${WORK_ROOT}/.qt-android/Qt"
+            python3 -m aqt install-qt linux android "${QT_VERSION}" android_arm64_v8a \
+              -O "${WORK_ROOT}/.qt-android/Qt"
           fi
 
       - name: Bridge Android qmake6 wrapper to host Qt (symlink + PATH)
@@ -234,7 +242,7 @@ jobs:
           EOF
           cat android-aarch64.ini
 
-      - name: Create Meson native file for host Qt tools
+      - name: Create Meson native file for host Qt tools (adds qsb)
         working-directory: ${{ github.workspace }}
         run: |
           cat > native-qt.ini <<EOF
@@ -245,6 +253,9 @@ jobs:
           qtpaths6 = '${QT_HOST_DIR}/bin/qtpaths6'
           cmake    = '/usr/bin/cmake'
           pkg-config = '/usr/bin/pkg-config'
+          # Expose the Qt Shader Baker so Meson finds 'qsb-qt6'/'qsb'
+          qsb        = '${QT_HOST_DIR}/bin/qsb'
+          qsb-qt6    = '${QT_HOST_DIR}/bin/qsb'
           EOF
           cat native-qt.ini
 
@@ -259,6 +270,10 @@ jobs:
           qmake6 -query QT_INSTALL_PREFIX
           qtpaths6 -query QT_HOST_BINS || true
           qmake6 -v || true
+
+          # Sanity check: qsb must exist for qmlglsink
+          which qsb
+          qsb --version
 
           rm -rf build-android-a64
           # Force the pip Meson, not /usr/bin/meson
