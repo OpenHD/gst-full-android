@@ -1,4 +1,4 @@
-name: android-gst-full-without-qt
+name: android-gst-full
 
 on:
   push:
@@ -6,21 +6,26 @@ on:
   pull_request:
     branches: ["**"]
   workflow_dispatch:
+    inputs:
+      enable_qt6_plugin:
+        description: "Build gst-plugins-good:qt6 (requires your branch patches)"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
 
 env:
+  # Versions / paths
   API_LEVEL: "35"
   NDK_VERSION: "r27c"
-
-  WORK_ROOT: ${{ github.workspace }}
-  NDK_DIR: ${{ github.workspace }}/.ndk/ndk-r27c
-
-  QT_VERSION: "6.9.1"
-  QT_HOST_DIR: ${{ github.workspace }}/.qt-host/6.9.1/gcc_64
-  QT_ANDROID_DIR: ${{ github.workspace }}/.qt-android/Qt/6.9.1/android_arm64_v8a
-
+  NDK_DIR: /opt/android/ndk-r27c
   PREFIX: ${{ github.workspace }}/prefix/aarch64
   SRC_DIR: ${{ github.workspace }}/src
+  QT_VERSION: "6.9.1"
+  QT_HOST_DIR: /opt/Qt/6.9.1/gcc_64
+  QT_ANDROID_DIR: ${{ github.workspace }}/.qt/Qt/6.9.1/android_arm64_v8a
 
+  # Meson options
   MESON_OPTIONS: >
     -Dauto_features=disabled
     -Dintrospection=disabled
@@ -37,131 +42,70 @@ env:
     -Dgst-plugins-base:typefind=enabled
     -Dgst-plugins-base:codecparsers=enabled
     -Dgst-plugins-base:gl=enabled
-    -Dgst-plugins-base:gl_platforms=egl
-    -Dgst-plugins-base:gl_apis=gles2
-    -Dgst-plugins-base:gl_winsys=android
     -Dgst-full=enabled
     -Dgst-full-target-type=static_library
     -Dgst-full-libraries=app,video,audio,gl,codecparsers
-    -Dgst-plugins-good:qt6=enabled
-    -Dgst-plugins-good:qt-android=enabled
+
+  # Toggle this later to "enabled" once your branch has the clean Qt detection.
+  QT6_PLUGIN_TOGGLE: "disabled"
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           submodules: false
 
-      # ---------- CACHES ----------
-      - name: Restore ccache cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ccache
-          key: ccache-${{ runner.os }}-${{ env.NDK_VERSION }}-${{ env.API_LEVEL }}-${{ env.QT_VERSION }}-${{ hashFiles('android-aarch64.ini','subprojects/**','**/meson.build','**/meson_options.txt','.github/workflows/android-gst-full.yml') }}
-          restore-keys: |
-            ccache-${{ runner.os }}-${{ env.NDK_VERSION }}-${{ env.API_LEVEL }}-${{ env.QT_VERSION }}-
+      - name: Set QT6 toggle from dispatch input (optional)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          if [ "${{ inputs.enable_qt6_plugin }}" = "true" ]; then
+            echo "QT6_PLUGIN_TOGGLE=enabled" >> $GITHUB_ENV
+          fi
 
-      - name: Restore NDK
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.NDK_DIR }}
-          key: ndk-${{ runner.os }}-${{ env.NDK_VERSION }}
-
-      - name: Restore Qt host
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/.qt-host
-          key: qt-host-${{ runner.os }}-${{ env.QT_VERSION }}
-
-      - name: Restore Qt android
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/.qt-android
-          key: qt-android-${{ runner.os }}-${{ env.QT_VERSION }}-arm64v8a
-
-      - name: Restore pip cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('**/requirements*.txt','.github/workflows/android-gst-full.yml') }}
-          restore-keys: |
-            pip-${{ runner.os }}-
-
-      # ---------- SETUP ----------
-      - name: Install base deps (incl. libEGL for qsb)
+      - name: Install base deps
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential python3 python3-pip git cmake ninja-build \
             pkg-config yasm curl ca-certificates unzip \
-            autoconf automake libtool ccache \
-            libegl1
+            autoconf automake libtool
           python3 -m pip install --user --upgrade pip
           python3 -m pip install --user "meson>=1.4" "aqtinstall==3.3.0"
           echo "$HOME/.local/bin" >> $GITHUB_PATH
+          meson --version
+          ninja --version
+          cmake --version
 
-      - name: Configure ccache
+      - name: Fetch Android NDK ${{ env.NDK_VERSION }}
         run: |
-          mkdir -p ~/.cache/ccache
-          ccache --set-config=cache_dir=~/.cache/ccache
-          ccache --max-size=10G
-          ccache --set-config=compression=true
-          ccache --set-config=compiler_check=content
-          ccache --zero-stats || true
+          sudo mkdir -p /opt/android
+          cd /opt/android
+          curl -L -o android-ndk-${NDK_VERSION}-linux.zip \
+            https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip
+          sudo unzip -q android-ndk-${NDK_VERSION}-linux.zip
+          sudo mv android-ndk-${NDK_VERSION} ndk-${NDK_VERSION}
+          echo "ANDROID_NDK=${{ env.NDK_DIR }}" >> $GITHUB_ENV
 
-      - name: Install / restore Android NDK r27c
+      - name: Install Qt (desktop + Android kit)
         run: |
-          if [ ! -d "${NDK_DIR}" ]; then
-            mkdir -p "${WORK_ROOT}/.ndk"
-            cd "${WORK_ROOT}/.ndk"
-            curl -L -o ndk.zip https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip
-            unzip -q ndk.zip
-            mv android-ndk-${NDK_VERSION} ndk-${NDK_VERSION}
-          fi
-          echo "ANDROID_NDK=${NDK_DIR}" >> $GITHUB_ENV
+          python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 -O /opt/Qt
+          # Android kit goes to a user-writable dir to avoid sudo
+          python3 -m aqt install-qt linux android "${QT_VERSION}" android_arm64_v8a --outputdir "${{ github.workspace }}/.qt/Qt"
+          test -f "${QT_ANDROID_DIR}/lib/cmake/Qt6/Qt6Config.cmake" || (echo "Qt Android kit missing" && exit 1)
 
-      - name: Install / restore Qt (host + android, include ShaderTools)
-        run: |
-          # Host Qt + qsb (from qtshadertools). No 'qtdeclarative' here.
-          if [ ! -d "${QT_HOST_DIR}" ]; then
-            python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 \
-              -m qtshadertools -O "${WORK_ROOT}/.qt-host"
-          else
-            # Ensure qtshadertools exists even if cache was from an older run
-            if [ ! -x "${QT_HOST_DIR}/bin/qsb" ]; then
-              python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 \
-                -m qtshadertools -O "${WORK_ROOT}/.qt-host"
-            fi
-          fi
-          # Android Qt
-          if [ ! -d "${QT_ANDROID_DIR}" ]; then
-            python3 -m aqt install-qt linux android "${QT_VERSION}" android_arm64_v8a \
-              -m  qt5compat qtshadertools -O "${WORK_ROOT}/.qt-android/Qt"
-          fi
-
-      - name: Bridge Android qmake6 wrapper to host Qt (symlink + PATH) and ensure qsb-qt6
-        run: |
-          set -eux
-          mkdir -p "${GITHUB_WORKSPACE}/.qt-android/Qt/${QT_VERSION}"
-          ln -sfn "${QT_HOST_DIR}" "${GITHUB_WORKSPACE}/.qt-android/Qt/${QT_VERSION}/gcc_64"
-          echo "${QT_ANDROID_DIR}/bin:${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec" >> "$GITHUB_PATH"
-          echo "QT_HOST_PATH=${QT_HOST_DIR}" >> $GITHUB_ENV
-          # Ensure qsb is runnable and alias qsb-qt6 if Meson probes it
-          if [ -x "${QT_HOST_DIR}/bin/qsb" ] && [ ! -e "${QT_HOST_DIR}/bin/qsb-qt6" ]; then
-            ln -s qsb "${QT_HOST_DIR}/bin/qsb-qt6"
-          fi
-
-      - name: Prepare env
+      - name: Prepare dirs and env
         run: |
           mkdir -p "${PREFIX}" "${SRC_DIR}"
           echo "PKG_CONFIG_LIBDIR=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig:${PREFIX}/lib/gstreamer-1.0/pkgconfig" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=${PKG_CONFIG_LIBDIR}" >> $GITHUB_ENV
+          echo "PATH=${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec:${PATH}" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=${QT_ANDROID_DIR}:${CMAKE_PREFIX_PATH}" >> $GITHUB_ENV
 
-      # ---------- BUILD DEPS ----------
-      - name: Build x264 (static, PIC, with ccache)
+      - name: Build x264 (static, PIC)
         working-directory: ${{ env.SRC_DIR }}
         run: |
           set -eux
@@ -170,7 +114,7 @@ jobs:
           TOOL="${ANDROID_NDK}/toolchains/llvm/prebuilt/linux-x86_64"
           API="${API_LEVEL}"
           TARGET=aarch64-linux-android
-          export CC="ccache ${TOOL}/bin/${TARGET}${API}-clang"
+          export CC="${TOOL}/bin/${TARGET}${API}-clang"
           export AR="${TOOL}/bin/llvm-ar"
           export RANLIB="${TOOL}/bin/llvm-ranlib"
           export STRIP="${TOOL}/bin/llvm-strip"
@@ -185,7 +129,7 @@ jobs:
           make install
           PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig" pkg-config --modversion x264
 
-      - name: Build FFmpeg 7.1 (static, with ccache)
+      - name: Build FFmpeg 7.1 (static) with x264
         working-directory: ${{ env.SRC_DIR }}
         run: |
           set -eux
@@ -196,8 +140,8 @@ jobs:
           API="${API_LEVEL}"
           TARGET=aarch64-linux-android
           SYSROOT="${TOOL}/sysroot"
-          CC="ccache ${TOOL}/bin/${TARGET}${API}-clang"
-          CXX="ccache ${TOOL}/bin/${TARGET}${API}-clang++"
+          CC="${TOOL}/bin/${TARGET}${API}-clang"
+          CXX="${TOOL}/bin/${TARGET}${API}-clang++"
           AR="${TOOL}/bin/llvm-ar"
           RANLIB="${TOOL}/bin/llvm-ranlib"
           STRIP="${TOOL}/bin/llvm-strip"
@@ -214,96 +158,61 @@ jobs:
             --disable-programs --disable-doc --disable-debug
           make -j"$(nproc)"
           make install
+          PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig" pkg-config --modversion libavcodec
 
-      # ---------- MESON CROSS + NATIVE ----------
       - name: Create Meson cross file (android-aarch64.ini)
         working-directory: ${{ github.workspace }}
         run: |
-          TOOL="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64"
+          TOOL="${ANDROID_NDK}/toolchains/llvm/prebuilt/linux-x86_64"
           API="${API_LEVEL}"
           TARGET=aarch64-linux-android
           cat > android-aarch64.ini <<EOF
           [binaries]
-          c = ['ccache', '${TOOL}/bin/${TARGET}${API}-clang']
-          cpp = ['ccache', '${TOOL}/bin/${TARGET}${API}-clang++']
+          c = '${TOOL}/bin/${TARGET}${API}-clang'
+          cpp = '${TOOL}/bin/${TARGET}${API}-clang++'
           ar = '${TOOL}/bin/llvm-ar'
           strip = '${TOOL}/bin/llvm-strip'
-          pkg-config = '/usr/bin/pkg-config'
-          qmake6 = '${QT_ANDROID_DIR}/bin/qmake6'
-          qmake  = '${QT_ANDROID_DIR}/bin/qmake6'
+          pkgconfig = '/usr/bin/pkg-config'
 
-          [built-in options]
+          [properties]
+          needs_exe_wrapper = true
           c_args = ['-fPIC', '--sysroot=${TOOL}/sysroot']
-          cpp_args = ['-fPIC', '--sysroot=${TOOL}/sysroot']
           c_link_args = ['--sysroot=${TOOL}/sysroot']
-          cpp_link_args = ['--sysroot=${TOOL}/sysroot']
 
           [host_machine]
           system = 'android'
           cpu_family = 'aarch64'
-          cpu = 'aarch64'
+          cpu = 'armv8'
           endian = 'little'
-
-          [properties]
-          needs_exe_wrapper = true
-          sys_root = '${TOOL}/sysroot'
           EOF
+          echo "Wrote android-aarch64.ini:"
           cat android-aarch64.ini
 
-      - name: Create Meson native file for host Qt tools
-        working-directory: ${{ github.workspace }}
-        run: |
-          cat > native-qt.ini <<EOF
-          [binaries]
-          moc      = '${QT_HOST_DIR}/libexec/moc'
-          uic      = '${QT_HOST_DIR}/libexec/uic'
-          rcc      = '${QT_HOST_DIR}/libexec/rcc'
-          qmltyperegistrar = '${QT_HOST_DIR}/libexec/qmltyperegistrar'
-          qmlcachegen = '${QT_HOST_DIR}/libexec/qmlcachegen'
-          lrelease = '${QT_HOST_DIR}/bin/lrelease'
-          qtpaths6 = '${QT_HOST_DIR}/bin/qtpaths6'
-          cmake    = '/usr/bin/cmake'
-          pkg-config = '/usr/bin/pkg-config'
-          EOF
-          cat native-qt.ini
-
-      # ---------- GSTREAMER ----------
-      - name: Configure & build GStreamer with Qt6/QML (Android)
+      - name: Configure & build GStreamer (Amy branch) for Android
         run: |
           set -eux
-          export PATH="${QT_ANDROID_DIR}/bin:${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec:${PATH}"
-          export QT_HOST_PATH="${QT_HOST_DIR}"
-          export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:${QT_HOST_DIR}/lib"
-
-          which qmake6
-          qmake6 -query QT_INSTALL_PREFIX
-          qtpaths6 -query QT_HOST_BINS || true
-          which qsb || true
-          qsb --version || true
-
-          rm -rf build-android-a64
-          python3 -m mesonbuild.mesonmain setup build-android-a64 \
-            --prefix "$PREFIX" \
-            --cross-file "$GITHUB_WORKSPACE/android-aarch64.ini" \
-            --native-file "$GITHUB_WORKSPACE/native-qt.ini" \
+          # We expect this workflow file to live inside your fork of Amy's branch.
+          # If this repo is something else, add a 'git clone' here.
+          mkdir -p build-android-a64
+          meson setup build-android-a64 \
+            --prefix "${PREFIX}" \
+            --cross-file "${GITHUB_WORKSPACE}/android-aarch64.ini" \
             --default-library=static \
-            $MESON_OPTIONS \
-            -Dqt-method=auto \
-            -Dqt:qt_host_path="$QT_HOST_DIR" \
-            -Dqt:cmake_module_path="$QT_ANDROID_DIR/lib/cmake;$QT_ANDROID_DIR/lib/cmake/Qt6"
-
-          ninja -C build-android-a64 -j"$(nproc)"
+            ${MESON_OPTIONS} \
+            -Dgood=enabled \
+            -Dgst-plugins-good:qt6=${QT6_PLUGIN_TOGGLE}
+          ninja -C build-android-a64
           ninja -C build-android-a64 install
 
       - name: Verify artifacts
         run: |
           set -eux
           test -f "${PREFIX}/lib/libgstreamer-full-1.0.a"
-          ls -l "${PREFIX}/lib/gstreamer-1.0" | grep -Ei 'qml6|qmlgl|qt6' || true
-          PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig" pkg-config --modversion gstreamer-full-1.0 || true
-
-      - name: ccache stats
-        run: ccache --show-stats || true
+          PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig" pkg-config --modversion gstreamer-full-1.0
+          echo "Installed libs:"
+          ls -1 "${PREFIX}/lib" | sed -n '1,200p'
+          echo "Plugins:"
+          ls -1 "${PREFIX}/lib/gstreamer-1.0" || true
 
       - name: Package artifacts
         run: |
