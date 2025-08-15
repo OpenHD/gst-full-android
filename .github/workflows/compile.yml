@@ -87,13 +87,14 @@ jobs:
             pip-${{ runner.os }}-
 
       # ---------- SETUP ----------
-      - name: Install base deps
+      - name: Install base deps (plus Mesa EGL/GL runtime for qsb)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential python3 python3-pip git cmake ninja-build \
             pkg-config yasm curl ca-certificates unzip \
-            autoconf automake libtool ccache
+            autoconf automake libtool ccache \
+            libegl1 libegl-mesa0 libgbm1 libgl1 libglx0 libopengl0
           python3 -m pip install --user --upgrade pip
           python3 -m pip install --user "meson>=1.4" "aqtinstall==3.3.0"
           echo "$HOME/.local/bin" >> $GITHUB_PATH
@@ -120,7 +121,7 @@ jobs:
 
       - name: Install / restore Qt (host + android, plus Shader Tools for qsb)
         run: |
-          # Host Qt (ensure qtshadertools so qsb is available)
+          # Host Qt with qtshadertools to provide qsb
           if [ ! -d "${QT_HOST_DIR}" ]; then
             python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 \
               -O "${WORK_ROOT}/.qt-host" -m qtshadertools
@@ -130,7 +131,6 @@ jobs:
                 -O "${WORK_ROOT}/.qt-host" -m qtshadertools
             fi
           fi
-
           # Android Qt
           if [ ! -d "${QT_ANDROID_DIR}" ]; then
             python3 -m aqt install-qt linux android "${QT_VERSION}" android_arm64_v8a \
@@ -210,6 +210,7 @@ jobs:
       - name: Create Meson cross file (android-aarch64.ini)
         working-directory: ${{ github.workspace }}
         run: |
+          TOOL="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64}"
           TOOL="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64"
           API="${API_LEVEL}"
           TARGET=aarch64-linux-android
@@ -265,18 +266,20 @@ jobs:
           set -eux
           export PATH="${QT_ANDROID_DIR}/bin:${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec:${PATH}"
           export QT_HOST_PATH="${QT_HOST_DIR}"
+          export LD_LIBRARY_PATH="${QT_HOST_DIR}/lib:${LD_LIBRARY_PATH}"
+          export QT_QPA_PLATFORM=offscreen
 
           which qmake6
           qmake6 -query QT_INSTALL_PREFIX
           qtpaths6 -query QT_HOST_BINS || true
           qmake6 -v || true
 
-          # Sanity check: qsb must exist for qmlglsink
+          # Sanity check: qsb must exist and run
           which qsb
+          ldd "$(which qsb)" || true
           qsb --version
 
           rm -rf build-android-a64
-          # Force the pip Meson, not /usr/bin/meson
           python3 -m mesonbuild.mesonmain setup build-android-a64 \
             --prefix "$PREFIX" \
             --cross-file "$GITHUB_WORKSPACE/android-aarch64.ini" \
