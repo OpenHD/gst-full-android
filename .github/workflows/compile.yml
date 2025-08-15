@@ -128,7 +128,7 @@ jobs:
           # Host Qt + modules providing qsb and QML tools
           if [ ! -d "${QT_HOST_DIR}" ]; then
             python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 \
-              -m qtshadertools qtdeclarative -O "${WORK_ROOT}/.qt-host"
+              -m qtshadertools -O "${WORK_ROOT}/.qt-host"
           else
             # Ensure qtshadertools exists even if cache restored from older run
             if [ ! -x "${QT_HOST_DIR}/bin/qsb" ]; then
