@@ -21,9 +21,6 @@ env:
   PREFIX: ${{ github.workspace }}/prefix/aarch64
   SRC_DIR: ${{ github.workspace }}/src
 
-  # NOTE:
-  #  - gl platforms = egl, gl apis = gles2 (Android)
-  #  - qt plugin enabled + **windowing set to Android** both namespaced and top-level
   MESON_OPTIONS: >
     -Dauto_features=disabled
     -Dintrospection=disabled
@@ -46,7 +43,6 @@ env:
     -Dgst-full-target-type=static_library
     -Dgst-full-libraries=app,video,audio,gl,codecparsers
     -Dgst-plugins-good:qt6=enabled
-    -Dqt-android=enabled
     -Dgst-plugins-good:qt-android=enabled
 
 jobs:
@@ -145,7 +141,6 @@ jobs:
           set -eux
           mkdir -p "${GITHUB_WORKSPACE}/.qt-android/Qt/${QT_VERSION}"
           ln -sfn "${QT_HOST_DIR}" "${GITHUB_WORKSPACE}/.qt-android/Qt/${QT_VERSION}/gcc_64"
-          # PATH for both Android (target) tools and Host (qsb, moc, etc)
           echo "${QT_ANDROID_DIR}/bin:${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec" >> "$GITHUB_PATH"
           echo "QT_HOST_PATH=${QT_HOST_DIR}" >> $GITHUB_ENV
 
@@ -268,7 +263,6 @@ jobs:
       - name: Configure & build GStreamer with qt6 (Android)
         run: |
           set -eux
-          # Host tools need host libs so qsb can start
           export LD_LIBRARY_PATH="${QT_HOST_DIR}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           export PATH="${QT_ANDROID_DIR}/bin:${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec:${PATH}"
           export QT_HOST_PATH="${QT_HOST_DIR}"
@@ -290,7 +284,6 @@ jobs:
             -Dqt:qt_host_path="$QT_HOST_DIR" \
             -Dqt:cmake_module_path="$QT_ANDROID_DIR/lib/cmake;$QT_ANDROID_DIR/lib/cmake/Qt6"
 
-          # Print how Meson resolved the options so we can verify qt-android
           meson configure build-android-a64 || true
           meson introspect --buildoptions build-android-a64 || true
 
