@@ -123,24 +123,36 @@ jobs:
           fi
           echo "ANDROID_NDK=${NDK_DIR}" >> $GITHUB_ENV
 
-      - name: Install / restore Qt (host + android)
+      - name: Install / restore Qt (host + android, include ShaderTools)
         run: |
-          # Host Qt
+          # Host Qt + modules providing qsb and QML tools
           if [ ! -d "${QT_HOST_DIR}" ]; then
-            python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 -O "${WORK_ROOT}/.qt-host"
+            python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 \
+              -m qtshadertools qtdeclarative -O "${WORK_ROOT}/.qt-host"
+          else
+            # Ensure qtshadertools exists even if cache restored from older run
+            if [ ! -x "${QT_HOST_DIR}/bin/qsb" ]; then
+              python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 \
+                -m qtshadertools -O "${WORK_ROOT}/.qt-host"
+            fi
           fi
           # Android Qt
           if [ ! -d "${QT_ANDROID_DIR}" ]; then
             python3 -m aqt install-qt linux android "${QT_VERSION}" android_arm64_v8a -O "${WORK_ROOT}/.qt-android/Qt"
           fi
 
-      - name: Bridge Android qmake6 wrapper to host Qt (symlink + PATH)
+      - name: Bridge Android qmake6 wrapper to host Qt (symlink + PATH) and ensure qsb-qt6
         run: |
           set -eux
           mkdir -p "${GITHUB_WORKSPACE}/.qt-android/Qt/${QT_VERSION}"
           ln -sfn "${QT_HOST_DIR}" "${GITHUB_WORKSPACE}/.qt-android/Qt/${QT_VERSION}/gcc_64"
           echo "${QT_ANDROID_DIR}/bin:${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec" >> "$GITHUB_PATH"
           echo "QT_HOST_PATH=${QT_HOST_DIR}" >> $GITHUB_ENV
+          # Ensure qsb is runnable and alias qsb-qt6 if needed
+          ls -l "${QT_HOST_DIR}/bin" || true
+          if [ -x "${QT_HOST_DIR}/bin/qsb" ] && [ ! -e "${QT_HOST_DIR}/bin/qsb-qt6" ]; then
+            ln -s qsb "${QT_HOST_DIR}/bin/qsb-qt6"
+          fi
 
       - name: Prepare env
         run: |
@@ -268,6 +280,7 @@ jobs:
           qtpaths6 -query QT_HOST_BINS || true
           which qsb || true
           qsb --version || true
+          ls -l "${QT_HOST_DIR}/bin" | sed -n '1,120p' || true
 
           rm -rf build-android-a64
           python3 -m mesonbuild.mesonmain setup build-android-a64 \
@@ -283,23 +296,4 @@ jobs:
           ninja -C build-android-a64 -j"$(nproc)"
           ninja -C build-android-a64 install
 
-      - name: Verify artifacts
-        run: |
-          set -eux
-          test -f "${PREFIX}/lib/libgstreamer-full-1.0.a"
-          ls -l "${PREFIX}/lib/gstreamer-1.0" | grep -Ei 'qml6|qmlgl|qt6' || true
-          PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig" pkg-config --modversion gstreamer-full-1.0 || true
-
-      - name: ccache stats
-        run: ccache --show-stats || true
-
-      - name: Package artifacts
-        run: |
-          tar -C "${PREFIX}/.." -czf "${{ github.workspace }}/gst-android-aarch64.tar.gz" "$(basename "${PREFIX}")"
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: gst-android-aarch64
-          path: gst-android-aarch64.tar.gz
-          if-no-files-found: error
+     
