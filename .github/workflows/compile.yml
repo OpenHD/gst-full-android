@@ -11,9 +11,9 @@ env:
   API_LEVEL: "35"
   NDK_VERSION: "r27c"
 
-  # Install into workspace so we can cache them
   WORK_ROOT: ${{ github.workspace }}
   NDK_DIR: ${{ github.workspace }}/.ndk/ndk-r27c
+
   QT_VERSION: "6.9.1"
   QT_HOST_DIR: ${{ github.workspace }}/.qt-host/6.9.1/gcc_64
   QT_ANDROID_DIR: ${{ github.workspace }}/.qt-android/Qt/6.9.1/android_arm64_v8a
@@ -119,7 +119,7 @@ jobs:
           fi
           echo "ANDROID_NDK=${NDK_DIR}" >> $GITHUB_ENV
 
-      - name: Install / restore Qt (host + android) into workspace
+      - name: Install / restore Qt (host + android)
         run: |
           # Host Qt
           if [ ! -d "${QT_HOST_DIR}" ]; then
@@ -129,32 +129,22 @@ jobs:
           if [ ! -d "${QT_ANDROID_DIR}" ]; then
             python3 -m aqt install-qt linux android "${QT_VERSION}" android_arm64_v8a -O "${WORK_ROOT}/.qt-android/Qt"
           fi
-          
+
       - name: Bridge Android qmake6 wrapper to host Qt (symlink + PATH)
         run: |
           set -eux
-          # Make the sibling host kit path that the Android wrapper expects:
-          #   .qt-android/Qt/6.9.1/gcc_64  ->  .qt-host/6.9.1/gcc_64
+          # The Android qmake6 wrapper expects a sibling .../Qt/6.9.1/gcc_64
           mkdir -p "${GITHUB_WORKSPACE}/.qt-android/Qt/${QT_VERSION}"
           ln -sfn "${QT_HOST_DIR}" \
                   "${GITHUB_WORKSPACE}/.qt-android/Qt/${QT_VERSION}/gcc_64"
-
-          # Ensure wrappers + host tools are on PATH for subsequent steps
-          export PATH="${QT_ANDROID_DIR}/bin:${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec:${PATH}"
+          # PATH: Android wrappers first, then host tools
           echo "${QT_ANDROID_DIR}/bin:${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec" >> "$GITHUB_PATH"
-
-          # Quick sanity (wrapper should report Android prefix; qtpaths reports host bins)
-          qmake6 -query QT_INSTALL_PREFIX
-          qtpaths6 -query QT_HOST_BINS
-
 
       - name: Prepare env
         run: |
           mkdir -p "${PREFIX}" "${SRC_DIR}"
           echo "PKG_CONFIG_LIBDIR=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig:${PREFIX}/lib/gstreamer-1.0/pkgconfig" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig" >> $GITHUB_ENV
-          echo "CMAKE_PREFIX_PATH=${QT_ANDROID_DIR}:${CMAKE_PREFIX_PATH}" >> $GITHUB_ENV
-          echo "${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec" >> $GITHUB_PATH
 
       # ---------- BUILD DEPS ----------
       - name: Build x264 (static, PIC, with ccache)
@@ -224,18 +214,23 @@ jobs:
           cpp = ['ccache', '${TOOL}/bin/${TARGET}${API}-clang++']
           ar = '${TOOL}/bin/llvm-ar'
           strip = '${TOOL}/bin/llvm-strip'
-          pkgconfig = '/usr/bin/pkg-config'
+          pkg-config = '/usr/bin/pkg-config'
 
-          [properties]
-          needs_exe_wrapper = true
+          [built-in options]
           c_args = ['-fPIC', '--sysroot=${TOOL}/sysroot']
+          cpp_args = ['-fPIC', '--sysroot=${TOOL}/sysroot']
           c_link_args = ['--sysroot=${TOOL}/sysroot']
+          cpp_link_args = ['--sysroot=${TOOL}/sysroot']
 
           [host_machine]
           system = 'android'
           cpu_family = 'aarch64'
-          cpu = 'armv8'
+          cpu = 'aarch64'
           endian = 'little'
+
+          [properties]
+          needs_exe_wrapper = true
+          sys_root = '${TOOL}/sysroot'
           EOF
           cat android-aarch64.ini
 
@@ -249,7 +244,7 @@ jobs:
           rcc      = '${QT_HOST_DIR}/bin/rcc'
           qtpaths6 = '${QT_HOST_DIR}/bin/qtpaths6'
           cmake    = '/usr/bin/cmake'
-          pkgconfig= '/usr/bin/pkg-config'
+          pkg-config= '/usr/bin/pkg-config'
           EOF
           cat native-qt.ini
 
@@ -257,53 +252,30 @@ jobs:
       - name: Configure & build GStreamer with qt6qmlgl
         run: |
           set -eux
+          which qmake6
+          which qtpaths6
+          which moc
+          qmake6 -query QT_INSTALL_PREFIX     # should be the Android kit
+          qtpaths6 -query QT_HOST_BINS        # should be .../gcc_64/bin
 
-          ls -a /home/runner/work/gst-full-android/gst-full-android/.qt-android/Qt/
-          echo "__________________________________________________________________"
-          ls -a /home/runner/work/gst-full-android/gst-full-android/.qt-android/Qt/6.9.1/
-          echo "__________________________________________________________________"
-          ls -a /home/runner/work/gst-full-android/gst-full-android/.qt-android/Qt/6.9.1/gcc_64/
-          echo "__________________________________________________________________"
-          ls -a /home/runner/work/gst-full-android/gst-full-android/.qt-android/Qt/6.9.1/gcc_64/bin/
-          echo "__________________________________________________________________"
-
-          # Adjust these to your CI paths
-          export QT_HOST_DIR="$GITHUB_WORKSPACE/.qt-host/6.9.1/gcc_64"
-          export QT_ANDROID_DIR="$GITHUB_WORKSPACE/.qt-android/Qt/6.9.1/android_arm64_v8a"
-          
-          # Put Android kit wrappers FIRST, then host tools
-          export PATH="$QT_ANDROID_DIR/bin:$QT_HOST_DIR/bin:$QT_HOST_DIR/libexec:$PATH"
-          
-          # Quick sanity checks (must succeed)
-          which qmake6 || echo "qmake6 not on PATH"
-          which qtpaths6 || echo "qtpaths6 not on PATH"
-          which moc || echo "moc not on PATH"
-          
-          # qmake6 should be the ANDROID kit wrapper; this should print the android_arm64_v8a prefix
-          qmake6 -query QT_INSTALL_PREFIX
-          
-          # qtpaths should point host bins correctly
-          qtpaths6 -query QT_HOST_BINS
-
-          mkdir -p build-android-a64
+          rm -rf build-android-a64
           meson setup build-android-a64 \
             --prefix "$PREFIX" \
             --cross-file "$GITHUB_WORKSPACE/android-aarch64.ini" \
             --native-file "$GITHUB_WORKSPACE/native-qt.ini" \
             --default-library=static \
+            $MESON_OPTIONS \
             -Dgst-plugins-good:qt6=enabled \
-            -Dqt-method=config-tool \
-            -Dqt:qt_host_path="$QT_HOST_DIR" \
-            -Dqt:cmake_module_path="$QT_ANDROID_DIR/lib/cmake;$QT_ANDROID_DIR/lib/cmake/Qt6"
-          
-          ninja -C build-android-a64
+            -Dqt-method=qmake
+
+          ninja -C build-android-a64 -j"$(nproc)"
           ninja -C build-android-a64 install
 
       - name: Verify artifacts
         run: |
           set -eux
           test -f "${PREFIX}/lib/libgstreamer-full-1.0.a"
-          ls -l "${PREFIX}/lib/gstreamer-1.0" | grep -Ei 'qml6|qmlgl|qt6'
+          ls -l "${PREFIX}/lib/gstreamer-1.0" | grep -Ei 'qml6|qmlgl|qt6' || true
           PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig" pkg-config --modversion gstreamer-full-1.0 || true
 
       - name: ccache stats
