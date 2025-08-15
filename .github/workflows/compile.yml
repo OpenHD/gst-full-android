@@ -21,6 +21,9 @@ env:
   PREFIX: ${{ github.workspace }}/prefix/aarch64
   SRC_DIR: ${{ github.workspace }}/src
 
+  # NOTE:
+  #  - gl platforms = egl, gl apis = gles2 (Android)
+  #  - qt plugin enabled + **windowing set to Android** both namespaced and top-level
   MESON_OPTIONS: >
     -Dauto_features=disabled
     -Dintrospection=disabled
@@ -43,6 +46,7 @@ env:
     -Dgst-full-target-type=static_library
     -Dgst-full-libraries=app,video,audio,gl,codecparsers
     -Dgst-plugins-good:qt6=enabled
+    -Dqt-android=enabled
     -Dgst-plugins-good:qt-android=enabled
 
 jobs:
@@ -90,14 +94,15 @@ jobs:
             pip-${{ runner.os }}-
 
       # ---------- SETUP ----------
-      - name: Install base deps (incl. EGL/OpenGL for qsb)
+      - name: Install base deps
         run: |
+          set -eux
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential python3 python3-pip git cmake ninja-build \
             pkg-config yasm curl ca-certificates unzip \
             autoconf automake libtool ccache \
-            libegl1 libopengl0 libgl1
+            libegl1 libgl1 libopengl0   # runtime bits for qsb on CI
           python3 -m pip install --user --upgrade pip
           python3 -m pip install --user "meson>=1.4" "aqtinstall==3.3.0"
           echo "$HOME/.local/bin" >> $GITHUB_PATH
@@ -113,20 +118,22 @@ jobs:
 
       - name: Install / restore Android NDK r27c
         run: |
+          set -eux
           if [ ! -d "${NDK_DIR}" ]; then
             mkdir -p "${WORK_ROOT}/.ndk"
             cd "${WORK_ROOT}/.ndk"
-            curl -L -o ndk.zip https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip
+            curl -L -o ndk.zip "https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip"
             unzip -q ndk.zip
-            mv android-ndk-${NDK_VERSION} ndk-${NDK_VERSION}
+            mv "android-ndk-${NDK_VERSION}" "ndk-${NDK_VERSION}"
           fi
           echo "ANDROID_NDK=${NDK_DIR}" >> $GITHUB_ENV
 
       - name: Install / restore Qt (host + android)
         run: |
-          # Host Qt (+ qsb via qtshadertools)
+          set -eux
+          # Host Qt
           if [ ! -d "${QT_HOST_DIR}" ]; then
-            python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 -O "${WORK_ROOT}/.qt-host" -m qtshadertools
+            python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 -O "${WORK_ROOT}/.qt-host"
           fi
           # Android Qt
           if [ ! -d "${QT_ANDROID_DIR}" ]; then
@@ -138,11 +145,13 @@ jobs:
           set -eux
           mkdir -p "${GITHUB_WORKSPACE}/.qt-android/Qt/${QT_VERSION}"
           ln -sfn "${QT_HOST_DIR}" "${GITHUB_WORKSPACE}/.qt-android/Qt/${QT_VERSION}/gcc_64"
+          # PATH for both Android (target) tools and Host (qsb, moc, etc)
           echo "${QT_ANDROID_DIR}/bin:${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec" >> "$GITHUB_PATH"
           echo "QT_HOST_PATH=${QT_HOST_DIR}" >> $GITHUB_ENV
 
       - name: Prepare env
         run: |
+          set -eux
           mkdir -p "${PREFIX}" "${SRC_DIR}"
           echo "PKG_CONFIG_LIBDIR=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig:${PREFIX}/lib/gstreamer-1.0/pkgconfig" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig" >> $GITHUB_ENV
@@ -206,6 +215,7 @@ jobs:
       - name: Create Meson cross file (android-aarch64.ini)
         working-directory: ${{ github.workspace }}
         run: |
+          set -eux
           TOOL="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64"
           API="${API_LEVEL}"
           TARGET=aarch64-linux-android
@@ -216,7 +226,7 @@ jobs:
           ar = '${TOOL}/bin/llvm-ar'
           strip = '${TOOL}/bin/llvm-strip'
           pkg-config = '/usr/bin/pkg-config'
-          # TARGET qmake (Android) belongs in the CROSS file
+          # Android qmake belongs in CROSS (target)
           qmake6 = '${QT_ANDROID_DIR}/bin/qmake6'
           qmake  = '${QT_ANDROID_DIR}/bin/qmake6'
 
@@ -241,10 +251,11 @@ jobs:
       - name: Create Meson native file for host Qt tools
         working-directory: ${{ github.workspace }}
         run: |
+          set -eux
           cat > native-qt.ini <<EOF
           [binaries]
           moc      = '${QT_HOST_DIR}/libexec/moc'
-          uic      = '${QT_HOST_DIR}/bin/uic'
+          uic      = '${QT_HOST_DIR}/libexec/uic'
           rcc      = '${QT_HOST_DIR}/libexec/rcc'
           qsb      = '${QT_HOST_DIR}/bin/qsb'
           qtpaths6 = '${QT_HOST_DIR}/bin/qtpaths6'
@@ -254,22 +265,21 @@ jobs:
           cat native-qt.ini
 
       # ---------- GSTREAMER ----------
-      - name: Configure & build GStreamer with qt6qmlgl
+      - name: Configure & build GStreamer with qt6 (Android)
         run: |
           set -eux
+          # Host tools need host libs so qsb can start
+          export LD_LIBRARY_PATH="${QT_HOST_DIR}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           export PATH="${QT_ANDROID_DIR}/bin:${QT_HOST_DIR}/bin:${QT_HOST_DIR}/libexec:${PATH}"
           export QT_HOST_PATH="${QT_HOST_DIR}"
-          export LD_LIBRARY_PATH="${QT_HOST_DIR}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export CMAKE_PREFIX_PATH="${QT_ANDROID_DIR}"
 
           which qmake6
           qmake6 -query QT_INSTALL_PREFIX
           qtpaths6 -query QT_HOST_BINS || true
-          which qsb
-          qsb --version
-          qmake6 -v || true
+          which qsb || true
 
           rm -rf build-android-a64
-          # Force pip's Meson, not /usr/bin/meson
           python3 -m mesonbuild.mesonmain setup build-android-a64 \
             --prefix "$PREFIX" \
             --cross-file "$GITHUB_WORKSPACE/android-aarch64.ini" \
@@ -279,6 +289,10 @@ jobs:
             -Dqt-method=auto \
             -Dqt:qt_host_path="$QT_HOST_DIR" \
             -Dqt:cmake_module_path="$QT_ANDROID_DIR/lib/cmake;$QT_ANDROID_DIR/lib/cmake/Qt6"
+
+          # Print how Meson resolved the options so we can verify qt-android
+          meson configure build-android-a64 || true
+          meson introspect --buildoptions build-android-a64 || true
 
           ninja -C build-android-a64 -j"$(nproc)"
           ninja -C build-android-a64 install
