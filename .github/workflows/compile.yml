@@ -98,7 +98,7 @@ jobs:
             build-essential python3 python3-pip git cmake ninja-build \
             pkg-config yasm curl ca-certificates unzip \
             autoconf automake libtool ccache \
-            libegl1 libgl1 libopengl0   # runtime bits for qsb on CI
+            libegl1 libgl1 libopengl0
           python3 -m pip install --user --upgrade pip
           python3 -m pip install --user "meson>=1.4" "aqtinstall==3.3.0"
           echo "$HOME/.local/bin" >> $GITHUB_PATH
@@ -127,13 +127,16 @@ jobs:
       - name: Install / restore Qt (host + android)
         run: |
           set -eux
-          # Host Qt
+          # Host Qt (include Shader Tools -> qsb)
           if [ ! -d "${QT_HOST_DIR}" ]; then
-            python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 -O "${WORK_ROOT}/.qt-host"
+            python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 \
+              -O "${WORK_ROOT}/.qt-host" -m qtshadertools
           fi
+          test -x "${QT_HOST_DIR}/bin/qsb" || (echo "qsb missing in host kit" && ls -l "${QT_HOST_DIR}/bin" && exit 1)
           # Android Qt
           if [ ! -d "${QT_ANDROID_DIR}" ]; then
-            python3 -m aqt install-qt linux android "${QT_VERSION}" android_arm64_v8a -O "${WORK_ROOT}/.qt-android/Qt"
+            python3 -m aqt install-qt linux android "${QT_VERSION}" android_arm64_v8a \
+              -O "${WORK_ROOT}/.qt-android/Qt"
           fi
 
       - name: Bridge Android qmake6 wrapper to host Qt (symlink + PATH)
@@ -221,7 +224,6 @@ jobs:
           ar = '${TOOL}/bin/llvm-ar'
           strip = '${TOOL}/bin/llvm-strip'
           pkg-config = '/usr/bin/pkg-config'
-          # Android qmake belongs in CROSS (target)
           qmake6 = '${QT_ANDROID_DIR}/bin/qmake6'
           qmake  = '${QT_ANDROID_DIR}/bin/qmake6'
 
@@ -272,6 +274,7 @@ jobs:
           qmake6 -query QT_INSTALL_PREFIX
           qtpaths6 -query QT_HOST_BINS || true
           which qsb || true
+          qsb --version || true
 
           rm -rf build-android-a64
           python3 -m mesonbuild.mesonmain setup build-android-a64 \
@@ -283,9 +286,6 @@ jobs:
             -Dqt-method=auto \
             -Dqt:qt_host_path="$QT_HOST_DIR" \
             -Dqt:cmake_module_path="$QT_ANDROID_DIR/lib/cmake;$QT_ANDROID_DIR/lib/cmake/Qt6"
-
-          meson configure build-android-a64 || true
-          meson introspect --buildoptions build-android-a64 || true
 
           ninja -C build-android-a64 -j"$(nproc)"
           ninja -C build-android-a64 install
