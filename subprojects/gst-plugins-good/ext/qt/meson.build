@@ -163,8 +163,8 @@ endif
 #        optional_deps += dependency('gnustl', required : false)
 #      endif
 #    endif
-  endif
-endif
+#   endif
+# endif
 
 # Win32 windowing
 if host_system == 'windows'
