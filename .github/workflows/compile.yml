@@ -125,7 +125,6 @@ jobs:
 
       - name: Install / restore Qt (host + android, include ShaderTools)
         run: |
-          # Host Qt + qsb (from qtshadertools). No 'qtdeclarative' here.
           if [ ! -d "${QT_HOST_DIR}" ]; then
             python3 -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 \
               -m qtshadertools -O "${WORK_ROOT}/.qt-host"
@@ -139,7 +138,7 @@ jobs:
           # Android Qt
           if [ ! -d "${QT_ANDROID_DIR}" ]; then
             python3 -m aqt install-qt linux android "${QT_VERSION}" android_arm64_v8a \
-              -m qtdeclarative qt5compat qtquickcontrols2 qtshadertools -O "${WORK_ROOT}/.qt-android/Qt"
+              -m qt5compat qtshadertools -O "${WORK_ROOT}/.qt-android/Qt"
           fi
 
       - name: Bridge Android qmake6 wrapper to host Qt (symlink + PATH) and ensure qsb-qt6
