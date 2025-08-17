@@ -147,20 +147,22 @@ if qt5_egl.allowed()
   endif
 endif
 
-# Android windowing
-if host_system == 'android'
-  qt5_android = qt5_option \
-      .require(gst_gl_have_window_android, error_message: 'android windowing support in gstreamer-gl is required') \
-      .require(gst_gl_have_platform_egl, error_message: 'egl platform support in gstreamer-gl is required')
-  if gst_gl_have_window_android
-    qt5androidextras = dependency('qt5', modules : ['AndroidExtras'], method: qt5_method, required : qt5_android)
-    # for gl functions in QtGui/qopenglfunctions.h
-    glesv2_dep = cc.find_library('GLESv2', required : qt5_android)
-    if glesv2_dep.found() and qt5androidextras.found()
-      optional_deps += [qt5androidextras, glesv2_dep]
-      qt_defines += ['-DHAVE_QT_ANDROID']
-      have_qt_windowing = true
-    endif
+    # Android windowing
+#    if gst_gl_have_window_android
+      # FIXME: automagic
+#      qt5androidextras = dependency('qt5', modules : ['AndroidExtras'], method: qt6_method, required : false)
+      # for gl functions in QtGui/qopenglfunctions.h
+      # FIXME: automagic
+#      glesv2_dep = cc.find_library('GLESv2', required : false)
+#      if glesv2_dep.found() and qt5androidextras.found()
+#        optional_deps += [qt5androidextras, glesv2_dep]
+#        qt_defines += ['-DHAVE_QT_ANDROID']
+#        have_qt_windowing = true
+        # Needed for C++11 support in Cerbero. People building with Android
+        # in some other way need to add the necessary bits themselves.
+#        optional_deps += dependency('gnustl', required : false)
+#      endif
+#    endif
   endif
 endif
 
