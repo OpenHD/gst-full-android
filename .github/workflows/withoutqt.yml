@@ -44,8 +44,7 @@ env:
     -Dgst-plugins-base:gl=enabled
     -Dgst-full=enabled
     -Dgst-full-target-type=static_library
-    -Dgst-full-libraries=coreelements,playback,typefindfunctions,app,video,audio,gl,codecparsers,udp,rtp,rtpmanager,rtsp,videoparsersbad
-
+    -Dgst-full-libraries=app,video,audio,gl,codecparsers,udp,rtp,rtpmanager,videoparsersbad
 
   # Toggle this later to "enabled" once your branch has the clean Qt detection.
   QT6_PLUGIN_TOGGLE: "disabled"
