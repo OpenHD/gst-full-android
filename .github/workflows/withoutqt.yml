@@ -1,4 +1,4 @@
-name: android-gst-full
+name: android-gst-full without qmlglsink
 
 on:
   push:
