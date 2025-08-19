@@ -82,6 +82,7 @@ jobs:
             autoconf automake libtool libgl1-mesa-dev libdrm-dev libgbm-dev libudev-dev
           python3 -m pip install --user --upgrade pip
           python3 -m pip install --user "meson>=1.4" "aqtinstall==3.3.0"
+          sudo apt-get install -y libgl1-mesa-dev libglu1-mesa-dev
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           meson --version
           ninja --version
