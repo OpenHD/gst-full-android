@@ -39,6 +39,7 @@ env:
     -Dgst-plugins-good:udp=enabled
     -Dgst-plugins-base:net=enabled
     -Dgst-plugins-base:rtp=enabled
+    -Dgst-plugins-good:rtp=enabled
     -Dgst-plugins-good:rtpmanager=enabled
     -Dgst-plugins-base:sdp=enabled
     -Dgst-plugins-bad:videoparsers=enabled
