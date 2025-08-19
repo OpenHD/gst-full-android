@@ -64,7 +64,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
 
       - name: Set QT6 toggle from dispatch input (optional)
         if: ${{ github.event_name == 'workflow_dispatch' }}
