@@ -215,16 +215,13 @@ jobs:
         run: |
           set -eux
           test -f "${PREFIX}/lib/libgstreamer-full-1.0.a"
+          strings "${PREFIX}/lib/libgstreamer-full-1.0.a" | grep -i rtph264depay >/dev/null
+          echo "__________True?______"  
           PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig" pkg-config --modversion gstreamer-full-1.0
           echo "Installed libs:"
           ls -1 "${PREFIX}/lib" | sed -n '1,200p'
           echo "Plugins:"
           ls -1 "${PREFIX}/lib/gstreamer-1.0" || true
-
-      - name: Verify rtph264depay is present in gstreamer-full
-        run: |
-          set -eux
-          strings "${PREFIX}/lib/libgstreamer-full-1.0.a" | grep -i rtph264depay >/dev/null
 
       - name: Package artifacts
         run: |
